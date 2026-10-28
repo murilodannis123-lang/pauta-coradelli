@@ -21,7 +21,7 @@ Sem o Firebase configurado, ele abre em **modo local**: começa zerado, pede seu
 - **Prazos** (tela inicial): carimbo D-X por urgência, filtros Vencidos / Hoje / 1–3 dias / 4–7 / +7 / sem prazo / cumpridos, ordenação mais → menos urgente, busca, filtro por responsável e área, "só os meus".
 - **Novo caso**: judicial (número CNJ com máscara, **conferência do dígito verificador** e tribunal preenchido sozinho) ou administrativo (NB/protocolo INSS/CRPS), partes, quem representamos, o que aconteceu, prazo, **responsável da equipe** e lembrete automático na agenda X dias úteis antes.
 - **Calculadora de prazo**: a partir da intimação, em dias úteis ou corridos, pulando fins de semana, feriados nacionais (inclui Carnaval, Sexta-feira Santa, Corpus Christi, 20/11 e 08/12) e, opcional, o recesso de 20/12 a 20/01. **Feriados municipais/estaduais e suspensões do tribunal não entram — sempre conferir.**
-- **Caso aberto**: andamentos (linha do tempo), marcar cumprido / reabrir, trocar responsável, agendar, abas **Resumo** e **PDF** (esqueleto pronto, ver "Próximas etapas").
+- **Caso aberto**: andamentos (linha do tempo), marcar cumprido / reabrir, trocar responsável, agendar, **Documentos** (anexar PDFs) e **Resumo** gerado por IA a partir dos PDFs.
 - **Agenda**: calendário mensal com compromissos e prazos fatais; tocando no dia aparece a programação embaixo; compromisso **vira "Finalizado" sozinho** quando passa do horário de fim (ou do início, se não tiver fim); responsável e processo vinculado.
 - **Sininho**: prazos urgentes seus, casos atribuídos a você, compromissos marcados no seu nome e menções/mensagens diretas no chat.
 - **Equipe**: cada pessoa com cor; tocando no nome mostra **tudo ligado a ela** (casos, prazos, próximos e finalizados).
@@ -80,13 +80,26 @@ Pronto: entre com Google. O primeiro acesso de cada pessoa a adiciona automatica
 - `responsavel` aceita e-mail ou nome de quem está na Equipe.
 - Caminho natural: uma função na nuvem (Firebase Cloud Functions) que recebe o texto da intimação/PDF, chama a IA e grava na coleção `casos` com `origem: "ia"`.
 
-### Resumo do processo
-- Campo `resumo: { texto, origem, atualizadoEm, por }` já existe em cada caso; hoje dá para escrever à mão. O botão "Gerar resumo do PDF" está desligado esperando a função de IA.
-- **Nunca coloque chave de API de IA no `config.js`** (o site é público). A chamada tem que acontecer numa função de servidor.
+### Documentos e resumo (já funcionando)
+- Cada caso tem a aba **Documentos**: arraste ou escolha PDFs, imagens ou .txt. Os arquivos ficam no **IndexedDB deste navegador** (não vão para o GitHub nem para o backup JSON).
+- A aba **Resumo** lê os PDFs (texto extraído no próprio navegador com pdf.js) e manda para a **API do Claude**, que devolve o resumo com as páginas citadas. O resumo fica salvo no caso com o selo "gerado por IA · conferir".
+- Precisa de uma chave da API: menu da conta → **Configurar IA**. A chave fica só naquele navegador. Cada resumo é cobrado na conta da API.
+- PDFs escaneados (só imagem) vão direto como arquivo, até 100 páginas / 20 MB por documento.
+- Processos muito longos: acima de ~500 mil caracteres, o início e o fim dos autos são lidos e o meio é pulado (o resumo avisa).
 
-### PDF do processo
-- Campo `pdf: { url, nome }` já existe; hoje aceita um link (Drive, e-SAJ, PJe).
-- Upload direto usa Firebase Storage, que em projetos novos exige o plano **Blaze** (pago por uso, com cota gratuita). Confira as condições atuais no console antes de ativar.
+### Receber PDF de outra aba (para o Claude pegar o processo no tribunal)
+A Pauta aceita arquivos enviados por `postMessage` de páginas `*.jus.br` (outras origens: `origensAnexo` no `config.js`). Na aba do tribunal, já logado:
+
+```js
+const buf = await fetch(URL_DO_PDF, { credentials: 'include' }).then(r => r.arrayBuffer());
+const w = window.open('https://murilodannis123-lang.github.io/pauta-coradelli/', 'pauta');
+await new Promise(ok => addEventListener('message', function h(e) { if (e.data?.tipo === 'pauta-pronta') { removeEventListener('message', h); ok(); } }));
+const resp = new Promise(ok => addEventListener('message', e => e.data?.tipo === 'pauta-anexado' && ok(e.data)));
+w.postMessage({ tipo: 'pauta-anexar', processo: 'NÚMERO CNJ', nome: 'autos.pdf', arquivo: buf }, 'https://murilodannis123-lang.github.io');
+await resp; // { ok: true, casoId, docId } ou { ok: false, erro }
+```
+
+Na própria página da Pauta também existem `Pauta.anexarArquivo(numero, blob, nome)`, `Pauta.gerarResumo(numero)` e `Pauta.salvarResumo(numero, texto)`.
 
 ## Estrutura do banco (Firestore)
 
@@ -94,7 +107,8 @@ Pronto: entre com Google. O primeiro acesso de cada pessoa a adiciona automatica
 equipe/{id}     nome, cargo, email, cor, foto
 casos/{id}      tipo, numero, autor, reu, representa, area, orgao, tipoPrazo, prazo (AAAA-MM-DD),
                 responsavelId, status (aberto|cumprido), andamentos[], resumo, pdf,
-                origem (manual|importado|ia), revisado, criadoPor, criadoEm
+                origem (manual|importado|ia), revisado, criadoPor, criadoEm,
+                documentos[] {id, nome, tipo, tamanho, paginas, criadoEm, por}  (arquivo no IndexedDB do aparelho)
 agenda/{id}     titulo, tipo, data, inicio, fim, responsavelId, casoId, descricao, concluido, criadoPor
 mensagens/{id}  canal (geral | dm:idA:idB), autorId, autorNome, texto, criadoEm
 ```

@@ -157,6 +157,8 @@ const ICON = {
   left: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>',
   right: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>',
   file: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 13h6M9 17h6"/></svg>',
+  clip: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5l-8 8a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7L9.7 17.2a1.7 1.7 0 0 1-2.4-2.4L15 7.1"/></svg>',
+  key: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3M15 8l2 2"/></svg>',
   spark: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 16l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z"/></svg>',
   list: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></svg>',
   info: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>',
@@ -284,7 +286,7 @@ let fb = null;     // módulos do Firebase
 const ui = {
   view: 'prazos', filtro: 'ativos', ordem: 'urgentes', busca: '', area: '', resp: '', soMeus: false,
   calY: new Date().getFullYear(), calM: new Date().getMonth(), calDia: todayISO(),
-  membroId: null, canal: 'geral', caso: null, casoAba: 'andamentos', bell: false, menu: false,
+  membroId: null, canal: 'geral', caso: null, casoAba: 'andamentos', bell: false, menu: false, resumoJob: null,
 };
 const member = id => Store.data.equipe.find(m => m.id === id);
 const meMember = () => me && (me.localId ? member(me.localId) : null) || me && !me.localId && Store.data.equipe.find(m => (m.email || '').toLowerCase() === (me.email || '').toLowerCase());
@@ -405,6 +407,7 @@ function menuPanel(m) {
   <div class="pop" role="menu" aria-label="Conta">
     <div class="menu-who">${avatar(m)}<div><b>${esc(m.nome)}</b><small>${esc(m.email || '')}</small></div></div>
     <button class="menu-item" data-act="theme">${ICON.moon}${dark ? 'Tema claro' : 'Tema escuro'}</button>
+    <button class="menu-item" data-act="config-ia">${ICON.key}Configurar IA${iaCfg().key ? '' : ' (resumos)'}</button>
     <button class="menu-item" data-act="import">${ICON.up}Importar casos (JSON)</button>
     ${IS_ARTIFACT ? '' : `<button class="menu-item" data-act="export-ics">${ICON.calendario}Exportar agenda e prazos (.ics)</button>
     <button class="menu-item" data-act="export-json">${ICON.down}Baixar backup (JSON)</button>`}
@@ -506,11 +509,298 @@ function viewPrazos() {
   </div>`;
 }
 
+
+/* ---------------- DOCUMENTOS (arquivos ficam no IndexedDB deste aparelho) ---------------- */
+const IDB = {
+  _db: null,
+  open() {
+    if (this._db) return this._db;
+    this._db = new Promise((res, rej) => {
+      const r = indexedDB.open('pauta-arquivos', 1);
+      r.onupgradeneeded = () => { const s = r.result.createObjectStore('arquivos', { keyPath: 'id' }); s.createIndex('casoId', 'casoId'); };
+      r.onsuccess = () => res(r.result); r.onerror = () => { this._db = null; rej(r.error); };
+    });
+    return this._db;
+  },
+  async tx(mode, fn) { const db = await this.open(); return new Promise((res, rej) => { const t = db.transaction('arquivos', mode); const out = fn(t.objectStore('arquivos')); t.oncomplete = () => res(out && 'result' in out ? out.result : out); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error || new Error('Sem espaço para salvar o arquivo neste aparelho')); }); },
+  put(rec) { return this.tx('readwrite', s => s.put(rec)); },
+  get(id) { return this.tx('readonly', s => s.get(id)); },
+  del(id) { return this.tx('readwrite', s => s.delete(id)); },
+};
+const fmtBytes = n => n >= 1e6 ? (n / 1e6).toFixed(1).replace('.', ',') + ' MB' : Math.max(1, Math.round(n / 1e3)) + ' KB';
+const isPdf = d => /pdf/i.test(d.tipo || '') || /\.pdf$/i.test(d.nome || '');
+const isImg = d => /^image\/(png|jpe?g|webp|gif)$/i.test(d.tipo || '');
+const isTxt = d => /^text\//i.test(d.tipo || '') || /\.txt$/i.test(d.nome || '');
+const legivel = d => isPdf(d) || isImg(d) || isTxt(d);
+const quemSou = () => meMember()?.nome || me?.nome || '';
+function acharCaso(ref) {
+  const r = String(ref || ''); const dig = r.replace(/\D/g, '');
+  return Store.get('casos', r) || Store.data.casos.find(c => dig.length >= 10 && String(c.numero || '').replace(/\D/g, '') === dig) || Store.data.casos.find(c => c.numero === r);
+}
+async function anexarArquivo(ref, blob, nome) {
+  const c = acharCaso(ref); if (!c) throw new Error('Processo não cadastrado na Pauta: ' + ref);
+  const id = uid(), tipo = blob.type || (/\.pdf$/i.test(nome) ? 'application/pdf' : '');
+  try { navigator.storage?.persist?.(); } catch { /* opcional */ }
+  await IDB.put({ id, casoId: c.id, nome, tipo, tamanho: blob.size, criadoEm: Date.now(), blob, texto: null, paginas: null });
+  const meta = { id, nome, tipo, tamanho: blob.size, criadoEm: Date.now(), por: quemSou() };
+  await Store.update('casos', c.id, { documentos: [...(acharCaso(c.id).documentos || []), meta] });
+  if (isPdf(meta)) prepararTexto(id).catch(() => {}); // conta páginas e guarda o texto em segundo plano
+  return { casoId: c.id, docId: id };
+}
+async function anexarArquivos(casoId, files) {
+  let ok = 0;
+  for (const f of files) {
+    try { await anexarArquivo(casoId, f, f.name); ok++; }
+    catch (e) { toast(`Não foi possível anexar ${f.name}: ${e.message}`, 'danger'); }
+  }
+  if (ok) toast(ok === 1 ? 'Documento anexado' : `${ok} documentos anexados`);
+}
+async function removerDocumento(casoId, docId) {
+  try { await IDB.del(docId); } catch { /* já não existia */ }
+  const c = Store.get('casos', casoId);
+  await Store.update('casos', casoId, { documentos: (c.documentos || []).filter(d => d.id !== docId) });
+}
+
+let _pdfjs = null;
+const PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+function loadPdfJs() {
+  if (_pdfjs) return _pdfjs;
+  _pdfjs = new Promise((res, rej) => {
+    if (window.pdfjsLib) { window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS + 'pdf.worker.min.js'; return res(window.pdfjsLib); }
+    const s = document.createElement('script'); s.src = PDFJS + 'pdf.min.js';
+    s.onload = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS + 'pdf.worker.min.js'; res(window.pdfjsLib); };
+    s.onerror = () => { _pdfjs = null; rej(new Error('Não consegui carregar o leitor de PDF. Confira a internet.')); };
+    document.head.appendChild(s);
+  });
+  return _pdfjs;
+}
+async function extrairTextoPDF(blob, onProg) {
+  const lib = await loadPdfJs();
+  let pdf;
+  try { pdf = await lib.getDocument({ data: new Uint8Array(await blob.arrayBuffer()) }).promise; }
+  catch (e) { throw new Error(e?.name === 'PasswordException' ? 'O PDF está protegido por senha.' : 'Não consegui abrir o PDF: ' + (e.message || e)); }
+  const n = pdf.numPages; let out = '';
+  for (let p = 1; p <= n; p++) {
+    if (onProg && (p === 1 || p % 5 === 0 || p === n)) onProg(p, n);
+    const page = await pdf.getPage(p); const tc = await page.getTextContent();
+    out += `\n=== Página ${p} ===\n` + tc.items.map(i => i.str + (i.hasEOL ? '\n' : ' ')).join('');
+    page.cleanup();
+  }
+  await pdf.destroy();
+  return { texto: out, paginas: n };
+}
+const _preparando = {};
+function prepararTexto(docId, onProg) {
+  if (_preparando[docId] && !onProg) return _preparando[docId];
+  const job = (async () => {
+    const rec = await IDB.get(docId); if (!rec) throw new Error('Arquivo não está salvo neste aparelho.');
+    if (rec.texto != null) return rec;
+    const r = await extrairTextoPDF(rec.blob, onProg);
+    rec.texto = r.texto; rec.paginas = r.paginas; await IDB.put(rec);
+    const c = Store.get('casos', rec.casoId);
+    if (c) await Store.update('casos', c.id, { documentos: (c.documentos || []).map(d => d.id === docId ? { ...d, paginas: r.paginas } : d) });
+    return rec;
+  })();
+  _preparando[docId] = job; job.finally(() => { delete _preparando[docId]; });
+  return job;
+}
+const blobToB64 = blob => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = () => rej(r.error); r.readAsDataURL(blob); });
+
+/* ---------------- RESUMO COM IA ---------------- */
+const IA_KEY = 'pauta-ia';
+const iaCfg = () => ({ modelo: 'claude-sonnet-5-5', key: '', ...ls.get(IA_KEY, {}) });
+const LIMITE_TEXTO = 500000; // caracteres (~125 mil tokens)
+function promptResumo() {
+  const adv = CFG.advogada || 'a advogada do escritório';
+  return `Você é assistente jurídico do escritório ${OFFICE}. Resuma o processo usando SOMENTE o conteúdo dos documentos fornecidos.
+
+Regras:
+- Não invente fatos, datas, valores, nomes ou números. Quando algo não constar, escreva "não consta nos documentos".
+- Para cada fato relevante, indique a página entre parênteses, ex.: (p. 12). As páginas aparecem marcadas como "=== Página N ===".
+- Não cite artigos de lei, súmulas ou precedentes por conta própria. Se mencionar algo que a parte ou o juízo citou, deixe claro quem citou.
+- O cliente do escritório é a parte representada por ${adv}. Ela nunca é parte do processo.
+- Português do Brasil, direto, sem floreio. No máximo ~700 palavras.
+
+Responda em Markdown, exatamente com estas seções:
+## Identificação
+Número, juízo/vara, classe/assunto, partes (polo ativo e passivo), advogados e valor da causa.
+## Cliente do escritório
+Quem ${adv} representa e em qual polo. Se não der para identificar, diga.
+## Pedido e fundamentos
+## Linha do tempo
+Uma linha por ato: DD/MM/AAAA — o que aconteceu (p. N).
+## Situação atual
+## Prazos e próximos passos
+O que está pendente, para quem e com base em qual ato. Não calcule data final de prazo; informe o ato e o número de dias quando constar.
+## Pontos de atenção
+Provas faltantes, fundamentos de indeferimento, riscos e inconsistências.`;
+}
+async function gerarResumo(casoId, docIds) {
+  const cfg = iaCfg(); const c0 = Store.get('casos', casoId);
+  const setMsg = (msg, extra = {}) => { ui.resumoJob = { casoId, msg, ...extra }; refresh(); };
+  if (!cfg.key) { setMsg('Falta configurar a chave da API (menu da conta → Configurar IA).', { erro: true }); return; }
+  const docs = (c0.documentos || []).filter(d => docIds.includes(d.id) && legivel(d));
+  if (!docs.length) { setMsg('Escolha pelo menos um PDF, imagem ou texto.', { erro: true }); return; }
+  try {
+    const textos = [], blocos = []; let bytes = 0;
+    for (const d of docs) {
+      if (isPdf(d)) {
+        setMsg(`Lendo ${d.nome}…`);
+        const rec = await prepararTexto(d.id, (p, n) => setMsg(`Lendo ${d.nome}: página ${p} de ${n}`));
+        const util = rec.texto.replace(/=== Página \d+ ===/g, '').replace(/\s+/g, '').length;
+        if (util >= rec.paginas * 40) { textos.push(`##### DOCUMENTO: ${d.nome} (${rec.paginas} páginas)\n${rec.texto}`); continue; }
+        if (rec.blob.size > 20e6 || rec.paginas > 100)
+          throw new Error(`"${d.nome}" parece digitalizado (só imagem) e passa do limite de leitura direta (${rec.paginas} págs, ${fmtBytes(rec.blob.size)}). Separe em partes de até 100 páginas e 20 MB.`);
+        bytes += rec.blob.size;
+        blocos.push({ type: 'text', text: `Documento digitalizado a seguir: ${d.nome} (${rec.paginas} páginas).` });
+        blocos.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: await blobToB64(rec.blob) } });
+      } else {
+        const rec = await IDB.get(d.id); if (!rec) throw new Error(`"${d.nome}" não está salvo neste aparelho.`);
+        if (isTxt(d)) { textos.push(`##### DOCUMENTO: ${d.nome}\n${await rec.blob.text()}`); continue; }
+        if (rec.blob.size > 5e6) throw new Error(`A imagem "${d.nome}" passa de 5 MB.`);
+        bytes += rec.blob.size;
+        blocos.push({ type: 'text', text: `Imagem a seguir: ${d.nome}.` });
+        blocos.push({ type: 'image', source: { type: 'base64', media_type: rec.tipo.replace('jpg', 'jpeg'), data: await blobToB64(rec.blob) } });
+      }
+    }
+    if (bytes > 22e6) throw new Error('Os documentos digitalizados somam mais de 22 MB. Gere o resumo com menos arquivos por vez.');
+    let texto = textos.join('\n\n'), cortado = false;
+    if (texto.length > LIMITE_TEXTO) { texto = texto.slice(0, 150000) + '\n\n[... trecho intermediário omitido por tamanho ...]\n\n' + texto.slice(-(LIMITE_TEXTO - 150000)); cortado = true; }
+    const c = Store.get('casos', casoId);
+    const cab = `Processo: ${c.numero || 'sem número'}\nPartes cadastradas: ${c.autor} × ${c.reu}\nÓrgão: ${c.orgao || 'não informado'}\n\n`;
+    const content = [{ type: 'text', text: cab + (texto || '(sem texto extraído; ver documentos anexos)') }, ...blocos];
+    setMsg('Escrevendo o resumo… pode levar até 1 minuto.');
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': cfg.key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+      body: JSON.stringify({ model: cfg.modelo, max_tokens: 4000, system: promptResumo(), messages: [{ role: 'user', content }] }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      const m = data?.error?.message || resp.statusText;
+      throw new Error(resp.status === 401 ? 'Chave da API inválida. Confira em Configurar IA.'
+        : resp.status === 429 ? 'Limite de uso da API atingido. Tente de novo em alguns minutos.'
+        : resp.status === 413 ? 'Documento grande demais para um envio. Gere com menos arquivos.'
+        : `A IA recusou o pedido (${resp.status}): ${m}`);
+    }
+    let out = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
+    if (!out) throw new Error('A IA não devolveu texto.');
+    if (data.stop_reason === 'max_tokens') out += '\n\n_(resumo cortado pelo limite de tamanho)_';
+    if (cortado) out += '\n\n_(o processo era muito longo: o meio dos autos não foi lido; início e fim foram)_';
+    await Store.update('casos', casoId, { resumo: { texto: out, origem: 'ia', atualizadoEm: Date.now(), por: quemSou(), fontes: docs.map(d => d.nome), modelo: cfg.modelo } });
+    ui.resumoJob = null; refresh(); toast('Resumo pronto — confira antes de usar');
+  } catch (e) {
+    setMsg(e.message === 'Failed to fetch' ? 'Sem conexão com a API. Confira a internet.' : (e.message || String(e)), { erro: true });
+  }
+}
+async function salvarResumo(ref, texto, fontes = []) {
+  const c = acharCaso(ref); if (!c) throw new Error('Processo não cadastrado na Pauta: ' + ref);
+  await Store.update('casos', c.id, { resumo: { texto: String(texto), origem: 'ia', atualizadoEm: Date.now(), por: 'Claude', fontes } });
+  return { casoId: c.id };
+}
+function md(s) {
+  let html = '', list = false;
+  const close = () => { if (list) { html += '</ul>'; list = false; } };
+  for (let l of esc(s).split('\n')) {
+    l = l.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/(^|\s)_(.+?)_(?=\s|$)/g, '$1<em>$2</em>').replace(/\(p\.\s?(\d+(?:[-–,]\s?\d+)*)\)/g, '<span class="pg">p. $1</span>');
+    if (/^#{1,6}\s/.test(l)) { close(); html += `<h4>${l.replace(/^#+\s*/, '')}</h4>`; }
+    else if (/^\s*[-*•]\s+/.test(l)) { if (!list) { html += '<ul>'; list = true; } html += `<li>${l.replace(/^\s*[-*•]\s+/, '')}</li>`; }
+    else if (!l.trim()) close();
+    else { close(); html += `<p>${l}</p>`; }
+  }
+  close(); return html;
+}
+function docsBody(c) {
+  const docs = [...(c.documentos || [])].sort((a, b) => b.criadoEm - a.criadoEm);
+  return `
+    <label class="dropzone drop-target" for="doc-file" data-caso="${esc(c.id)}">${ICON.clip}<b>Arraste os PDFs do processo aqui</b><span class="hint">ou toque para escolher · PDF, imagem ou texto</span></label>
+    <input type="file" id="doc-file" multiple hidden accept=".pdf,application/pdf,image/png,image/jpeg,image/webp,.txt,.doc,.docx">
+    ${docs.length ? `<ul class="doc-list">${docs.map(d => `<li class="doc">
+      <span class="doc-ic">${ICON.file}</span>
+      <span class="doc-info"><b>${esc(d.nome)}</b><small>${fmtBytes(d.tamanho || 0)}${d.paginas ? ` · ${d.paginas} págs` : ''} · ${esc(fmtStamp(d.criadoEm))}${d.por ? ' · ' + esc(d.por) : ''}</small></span>
+      <span class="doc-actions">
+        <button class="mini-btn" data-act="doc-open" data-id="${esc(d.id)}">Abrir</button>
+        <button class="mini-btn" data-act="doc-download" data-id="${esc(d.id)}">Baixar</button>
+        <button class="mini-btn" data-act="doc-del" data-id="${esc(d.id)}" aria-label="Excluir ${esc(d.nome)}">${ICON.trash}</button>
+      </span></li>`).join('')}</ul>` : '<p class="hint">Nenhum documento anexado.</p>'}
+    ${docs.some(legivel) ? `<button class="btn small primary" data-act="case-tab" data-v="resumo">${ICON.spark}Resumir a partir dos documentos</button>` : ''}
+    <p class="hint">Os arquivos ficam salvos neste aparelho${Store.mode === 'firebase' ? '; quem estiver em outro aparelho vê a lista, mas não abre o arquivo' : ''}. O backup JSON não inclui os arquivos.</p>
+    <form id="f-pdf" class="field"><span>Link externo do processo (e-SAJ, PJe, Drive…)</span>
+      <input id="pdf-url" type="url" data-keep placeholder="https://" value="${esc(c.pdf?.url || '')}">
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn small" type="submit">Salvar link</button>${c.pdf?.url ? `<a class="btn small" href="${esc(c.pdf.url)}" target="_blank" rel="noopener">Abrir link</a>` : ''}</div>
+    </form>`;
+}
+function resumoBody(c) {
+  const docs = (c.documentos || []).filter(legivel);
+  const job = ui.resumoJob && ui.resumoJob.casoId === c.id ? ui.resumoJob : null;
+  const rodando = job && !job.erro;
+  const temChave = !!iaCfg().key, r = c.resumo;
+  return `
+    ${r?.texto ? `<article class="resumo-md">
+        <div class="resumo-meta">${r.origem === 'ia' ? `<span class="tag ia">${ICON.spark}gerado por IA · conferir</span>` : '<span class="tag adm">manual</span>'}<span>${esc(fmtStamp(r.atualizadoEm || Date.now()))}${r.por ? ' · ' + esc(r.por) : ''}</span>${r.fontes?.length ? `<span>de: ${esc(r.fontes.join(', '))}</span>` : ''}</div>
+        ${md(r.texto)}
+        <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="mini-btn" data-act="copy-resumo">${ICON.copy}Copiar resumo</button></div>
+      </article>` : ''}
+    <div class="ia-box">
+      <div class="label">${r?.texto ? 'Gerar de novo' : 'Gerar resumo com IA'}</div>
+      ${docs.length ? `<div class="ia-docs">${docs.map(d => `<label class="check"><input type="checkbox" class="resumo-doc" value="${esc(d.id)}" checked ${rodando ? 'disabled' : ''}>${esc(d.nome)}${d.paginas ? ` <span class="hint">· ${d.paginas} págs</span>` : ''}</label>`).join('')}</div>`
+        : `<p class="hint">Anexe o PDF do processo na aba Documentos.</p><button class="btn small" data-act="case-tab" data-v="docs">${ICON.clip}Ir para Documentos</button>`}
+      ${temChave ? '' : `<div class="notice warn">${ICON.key}<span>Para a IA ler o processo, configure a chave da API uma vez neste aparelho.</span><button class="btn small" data-act="config-ia">Configurar IA</button></div>`}
+      ${docs.length && temChave ? `<div><button class="btn small primary" data-act="gerar-resumo" data-id="${esc(c.id)}" ${rodando ? 'disabled' : ''}>${ICON.spark}${rodando ? 'Gerando…' : r?.texto ? 'Gerar de novo' : 'Gerar resumo'}</button></div>` : ''}
+      ${job ? `<p class="hint ${job.erro ? 'bad' : ''}" role="status">${esc(job.msg)}</p>` : ''}
+    </div>
+    <details class="calc"${r?.texto ? '' : ' open'}><summary>${r?.texto ? 'Editar resumo à mão' : 'Escrever resumo à mão'}</summary>
+      <form id="f-resumo" class="field calc-body">
+        <textarea id="resumo-texto" data-keep rows="10" placeholder="Resumo do caso">${esc(r?.texto || '')}</textarea>
+        <div><button class="btn small primary" type="submit">Salvar resumo</button></div>
+      </form>
+    </details>`;
+}
+function iaModal() {
+  const cfg = iaCfg();
+  openModal(`
+  <form id="f-ia">
+    ${modalHead('Configurar IA')}
+    <div class="modal-body">
+      <p>O resumo usa a API do Claude. A chave fica salva só neste navegador, nunca vai para o GitHub.</p>
+      <label class="field"><span>Chave da API (Anthropic)</span><input id="ia-key" type="password" autocomplete="off" placeholder="sk-ant-..." value="${esc(cfg.key)}"></label>
+      <p class="hint">Crie em console.anthropic.com → API Keys. Cada resumo é cobrado na conta da API, conforme o tamanho do processo.</p>
+      <label class="field"><span>Modelo</span><input id="ia-modelo" class="mono" value="${esc(cfg.modelo)}"></label>
+      <div class="notice warn">${ICON.info}<span>Ao gerar um resumo, o texto do processo é enviado à API da Anthropic. Avalie com o escritório se isso atende à política de sigilo e à LGPD.</span></div>
+    </div>
+    <div class="modal-foot">${cfg.key ? '<button type="button" class="btn danger" data-act="ia-remover" style="margin-right:auto">Remover chave</button>' : ''}<button type="button" class="btn" data-act="close-modal">Cancelar</button><button type="submit" class="btn primary">Salvar</button></div>
+  </form>`, null, 'sm');
+}
+
+/* Recebe arquivo de outra aba (ex.: página do tribunal aberta pelo Claude) via postMessage */
+function origemPermitida(origin) {
+  try { const h = new URL(origin).hostname; return h.endsWith('.jus.br') || (CFG.origensAnexo || []).some(x => h === x || h.endsWith('.' + x)); } catch { return false; }
+}
+let _appPronto = false; const _filaMsgs = [];
+async function tratarMensagem(ev) {
+  const d = ev.data;
+  try {
+    const blob = d.arquivo instanceof Blob ? d.arquivo : new Blob([d.arquivo], { type: d.mime || 'application/pdf' });
+    const r = await anexarArquivo(d.processo, blob, d.nome || 'processo.pdf');
+    ev.source?.postMessage({ tipo: 'pauta-anexado', ok: true, ...r }, ev.origin);
+    toast(`Documento recebido: ${d.nome || 'processo.pdf'}`);
+  } catch (e) { ev.source?.postMessage({ tipo: 'pauta-anexado', ok: false, erro: e.message }, ev.origin); }
+}
+window.addEventListener('message', ev => {
+  if (ev.data?.tipo !== 'pauta-anexar' || !origemPermitida(ev.origin)) return;
+  if (_appPronto) tratarMensagem(ev); else _filaMsgs.push(ev);
+});
+function appPronto() {
+  if (_appPronto) return; _appPronto = true;
+  _filaMsgs.splice(0).forEach(tratarMensagem);
+  try { window.opener?.postMessage({ tipo: 'pauta-pronta' }, '*'); } catch { /* sem opener */ }
+}
+
 /* ---------------- GAVETA DO CASO ---------------- */
 function drawerHTML() {
   const c = Store.get('casos', ui.caso); if (!c) { ui.caso = null; return ''; }
   const u = urg(c), du = c.prazo && c.status !== 'cumprido' && u.rank <= 4 ? businessDaysUntil(c.prazo) : null;
-  const abas = [['andamentos', 'Andamentos', ICON.list], ['resumo', 'Resumo', ICON.spark], ['pdf', 'PDF', ICON.file], ['dados', 'Dados', ICON.info]];
+  const abas = [['andamentos', 'Andamentos', ICON.list], ['resumo', 'Resumo', ICON.spark], ['docs', `Documentos${(c.documentos || []).length ? ' · ' + c.documentos.length : ''}`, ICON.clip], ['dados', 'Dados', ICON.info]];
   const eventos = Store.data.agenda.filter(e => e.casoId === c.id).sort((a, b) => (a.data + (a.inicio || '')).localeCompare(b.data + (b.inicio || '')));
   let body = '';
   if (ui.casoAba === 'andamentos') {
@@ -524,24 +814,9 @@ function drawerHTML() {
       ${ands.length ? `<ol class="timeline">${ands.map(a => `<li><div class="when">${fmtDate(a.data)}${a.autor ? ' · ' + esc(a.autor) : ''}</div><div class="what">${esc(a.texto)}</div></li>`).join('')}</ol>` : '<p class="hint">Nenhum andamento registrado.</p>'}
       ${eventos.length ? `<div><div class="label" style="margin-bottom:8px">Na agenda</div><div class="ev-list">${eventos.map(e => `<button class="mini-ev ${eventStatus(e) === 'finalizado' ? 'fin' : ''}" data-act="goto-day" data-v="${e.data}"><span class="t">${esc(e.inicio || '—')}</span><span><b>${esc(e.titulo)}</b><small>${esc(fmtDate(e.data))} · ${esc(member(e.responsavelId)?.nome || '')}</small></span></button>`).join('')}</div></div>` : ''}`;
   } else if (ui.casoAba === 'resumo') {
-    body = `
-      <div class="soon">
-        <h4>${ICON.spark}Resumo automático — em breve</h4>
-        <p class="hint">Estrutura pronta: o PDF do processo será lido e o resumo gravado no campo <span class="mono">resumo</span> deste caso.</p>
-        <ol><li>Partes, pedido e valor da causa</li><li>Linha do tempo das principais decisões</li><li>Prazos em aberto e próximos passos</li><li>Pontos de atenção (fundamentos do indeferimento, provas faltantes)</li></ol>
-        <button class="btn small" disabled>${ICON.spark}Gerar resumo do PDF</button>
-      </div>
-      <form id="f-resumo" class="field"><span>Resumo manual ${c.resumo?.origem === 'ia' ? '(gerado pela IA — revisar)' : ''}</span>
-        <textarea id="resumo-texto" data-keep rows="8" placeholder="Escreva aqui um resumo do caso enquanto a leitura automática não chega.">${esc(c.resumo?.texto || '')}</textarea>
-        <div><button class="btn small primary" type="submit">Salvar resumo</button>${c.resumo?.atualizadoEm ? ` <span class="hint">Atualizado ${esc(fmtStamp(c.resumo.atualizadoEm))}${c.resumo.por ? ' por ' + esc(c.resumo.por) : ''}</span>` : ''}</div>
-      </form>`;
-  } else if (ui.casoAba === 'pdf') {
-    body = `
-      <div class="dropzone">${ICON.file}<b>Envio de PDF — em breve</b><span class="hint">O arquivo vai para o Firebase Storage e fica ligado a este caso (campo <span class="mono">pdf</span>).</span></div>
-      <form id="f-pdf" class="field"><span>Enquanto isso: link do PDF (Google Drive, e-SAJ, PJe…)</span>
-        <input id="pdf-url" type="url" data-keep placeholder="https://" value="${esc(c.pdf?.url || '')}">
-        <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn small primary" type="submit">Salvar link</button>${c.pdf?.url ? `<a class="btn small" href="${esc(c.pdf.url)}" target="_blank" rel="noopener">${ICON.file}Abrir PDF</a>` : ''}</div>
-      </form>`;
+    body = resumoBody(c);
+  } else if (ui.casoAba === 'docs') {
+    body = docsBody(c);
   } else {
     body = `<dl class="kv">
       <dt>Tipo</dt><dd>${c.tipo === 'administrativo' ? 'Administrativo' : 'Judicial'}</dd>
@@ -907,7 +1182,7 @@ async function importarCasos(arr, origemPadrao = 'importado') {
   }
   return { importados: ok.length, erros };
 }
-window.Pauta = { importarCasos, formato: EXEMPLO_IMPORT, calcPrazo, cnjParse };
+window.Pauta = { importarCasos, formato: EXEMPLO_IMPORT, calcPrazo, cnjParse, anexarArquivo, salvarResumo, gerarResumo: (ref, ids) => { const c = acharCaso(ref); return gerarResumo(c.id, ids || (c.documentos || []).map(d => d.id)); }, caso: acharCaso };
 
 /* ---------------- exportações (só fora do preview) ---------------- */
 function download(name, text, type) {
@@ -990,6 +1265,22 @@ document.addEventListener('click', async ev => {
     case 'restore-backup': ui.menu = false; refresh(); return $('#backup-file')?.click();
     case 'reset-demo': ui.menu = false; refresh(); return confirmModal('Apagar o que você mexeu e voltar aos dados de exemplo?', 'Restaurar', () => { Store.resetDemo(); toast('Dados de exemplo restaurados'); });
     case 'import': ui.menu = false; refresh(); return importModal();
+    case 'config-ia': ui.menu = false; refresh(); return iaModal();
+    case 'ia-remover': { const c = iaCfg(); ls.set(IA_KEY, { modelo: c.modelo }); closeModal(); toast('Chave removida deste aparelho'); return refresh(); }
+    case 'gerar-resumo': { const ids = [...document.querySelectorAll('.resumo-doc:checked')].map(x => x.value); return gerarResumo(id, ids); }
+    case 'copy-resumo': { const t = Store.get('casos', ui.caso)?.resumo?.texto || ''; try { await navigator.clipboard.writeText(t); toast('Resumo copiado'); } catch { toast('Não consegui copiar; use Editar e copie o texto', 'danger'); } return; }
+    case 'doc-open': {
+      const w = window.open('', '_blank');
+      try { const rec = await IDB.get(id); if (!rec) throw new Error(); const url = URL.createObjectURL(rec.blob); if (w) w.location.href = url; else location.href = url; }
+      catch { w?.close(); toast('Esse arquivo não está salvo neste aparelho', 'danger'); }
+      return;
+    }
+    case 'doc-download': {
+      try { const rec = await IDB.get(id); if (!rec) throw new Error(); const a = document.createElement('a'); a.href = URL.createObjectURL(rec.blob); a.download = rec.nome; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000); }
+      catch { toast('Esse arquivo não está salvo neste aparelho', 'danger'); }
+      return;
+    }
+    case 'doc-del': { const cid = ui.caso; return confirmModal('Excluir este documento do caso? O arquivo some deste aparelho.', 'Excluir', () => safe(removerDocumento(cid, id), 'Documento excluído')); }
     case 'export-ics': ui.menu = false; refresh(); download('pauta-agenda.ics', buildICS(), 'text/calendar'); return toast('Arquivo .ics baixado — importe no Google Agenda');
     case 'export-json': ui.menu = false; refresh(); download(`pauta-backup-${todayISO()}.json`, JSON.stringify(Store.data, null, 2), 'application/json'); return toast('Backup baixado');
 
@@ -1043,6 +1334,7 @@ document.addEventListener('input', ev => {
 });
 document.addEventListener('change', ev => {
   const t = ev.target;
+  if (t.id === 'doc-file' && t.files?.length) { const files = [...t.files]; t.value = ''; return anexarArquivos(ui.caso, files); }
   if (t.id === 'backup-file' && t.files?.[0]) { restoreBackup(t.files[0]); t.value = ''; return; }
   if (t.id === 'f-ordem') { ui.ordem = t.value; refresh(); }
   if (t.id === 'f-resp') { ui.resp = t.value; refresh(); }
@@ -1058,6 +1350,16 @@ document.addEventListener('keydown', ev => {
   }
   if (ev.target.id === 'chat-input' && ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); ev.target.form.requestSubmit(); }
 });
+
+['dragenter', 'dragover'].forEach(t => document.addEventListener(t, ev => {
+  const files = [...(ev.dataTransfer?.types || [])].includes('Files'); if (files) ev.preventDefault();
+  const z = ev.target.closest?.('.drop-target'); if (!z) return; ev.preventDefault(); z.classList.add('over');
+}));
+['dragleave', 'drop'].forEach(t => document.addEventListener(t, ev => {
+  if (t === 'drop' && [...(ev.dataTransfer?.types || [])].includes('Files')) ev.preventDefault();
+  const z = ev.target.closest?.('.drop-target'); if (!z) return; ev.preventDefault(); z.classList.remove('over');
+  if (t === 'drop' && ev.dataTransfer?.files?.length) anexarArquivos(z.dataset.caso, [...ev.dataTransfer.files]);
+}));
 
 document.addEventListener('submit', async ev => {
   const f = ev.target; ev.preventDefault();
@@ -1115,6 +1417,10 @@ document.addEventListener('submit', async ev => {
       f.querySelector('#and-texto').value = '';
       return safe(Store.update('casos', c.id, { andamentos: [...(c.andamentos || []), and] }), 'Andamento registrado');
     }
+    case 'f-ia': {
+      const key = f.querySelector('#ia-key').value.trim(), modelo = f.querySelector('#ia-modelo').value.trim() || 'claude-sonnet-5-5';
+      ls.set(IA_KEY, { key, modelo }); closeModal(); toast(key ? 'IA configurada neste aparelho' : 'Configuração salva'); return refresh();
+    }
     case 'f-resumo': return safe(Store.update('casos', ui.caso, { resumo: { texto: f.querySelector('#resumo-texto').value, origem: 'manual', atualizadoEm: Date.now(), por: quem } }), 'Resumo salvo');
     case 'f-pdf': { const url = f.querySelector('#pdf-url').value.trim(); return safe(Store.update('casos', ui.caso, { pdf: url ? { url, nome: '' } : null }), url ? 'Link salvo' : 'Link removido'); }
     case 'f-chat': {
@@ -1144,6 +1450,7 @@ function showApp() {
   seen = new Set(ls.get(seenKey(), []));
   const h = (location.hash || '').slice(1); if (TITULOS[h]) ui.view = h;
   const app = $('#app'); app.dataset.mode = 'app'; refresh();
+  appPronto();
 }
 function startDemo() {
   me = { email: 'voce@demo.local', nome: 'Você (demo)', foto: '' };

@@ -6,11 +6,15 @@
   3) Liste quem pode entrar (e-mails Google). Repita a mesma lista no firestore.rules —
      a trava de verdade é a regra do Firestore; esta lista só evita a tela abrir para quem não tem acesso.
 
-  Enquanto "firebase" estiver null, o site abre em MODO DEMONSTRAÇÃO
-  (dados de exemplo salvos só no seu navegador).
+  Enquanto "firebase" estiver null, o site abre em MODO LOCAL:
+  começa zerado e salva tudo só no navegador de quem usa.
 */
 window.APP_CONFIG = {
   officeName: 'Advocacia Coradelli',
+  advogada: 'Dra. Cristiane Paiva Coradelli Abate', // usada no resumo para identificar o cliente
+
+  // Sites que podem mandar PDF direto para a Pauta (além de *.jus.br)
+  origensAnexo: [],
 
   firebase: null,
   // firebase: {
