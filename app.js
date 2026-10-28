@@ -1136,7 +1136,7 @@ function loginHTML(msg) {
     ${CFG.allowDemo ? '<button class="btn ghost" data-act="login-demo">Abrir modo demonstração</button>' : ''}` : `
     <form id="f-start" class="field"><span>Seu nome</span><input id="start-nome" name="nome" required autocomplete="name" placeholder="Como a equipe te chama"><button class="btn primary" type="submit" style="margin-top:6px">Começar</button></form>
     <p class="hint">Por enquanto os dados ficam salvos neste navegador. O login com Google e o uso pela equipe toda ligam quando o <span class="mono">config.js</span> recebe os dados do Firebase (passo a passo no README).</p>`}
-    <p class="login-foot">Acesso restrito à equipe. Dados de clientes ficam protegidos pelas regras do banco — só e-mails liberados leem e gravam.</p>
+    ${hasFb ? '<p class="login-foot">Acesso restrito à equipe. Dados de clientes ficam protegidos pelas regras do banco — só e-mails liberados leem e gravam.</p>' : ''}
   </div></div>`;
 }
 function showLogin(msg) { const app = $('#app'); app.dataset.mode = 'login'; app.innerHTML = loginHTML(msg); }
