@@ -239,20 +239,24 @@ const Store = {
   persist() { if (this.mode === 'local') ls.set(this.key || LS_LOCAL, { v: 1, data: this.data }); },
   resetDemo() { this.data = seedData(); this.persist(); this.emit(); },
 
-  initFirebase(fbx) {
-    this.mode = 'firebase'; this.fb = fbx;
+  eid: null, esc: null,
+  col(c) { const { db, f } = this.fb; return f.collection(db, 'escritorios', this.eid, c); },
+  ref(c, id) { const { db, f } = this.fb; return f.doc(db, 'escritorios', this.eid, c, id); },
+  initFirebase(fbx, eid) {
+    this.mode = 'firebase'; this.fb = fbx; this.eid = eid;
     const { db, f } = fbx;
+    f.onSnapshot(f.doc(db, 'escritorios', eid), snap => { this.esc = snap.exists() ? snap.data() : null; this.emit(); }, () => {});
     return new Promise(resolve => {
       let pending = COLS.length;
       COLS.forEach(c => {
-        const ref = c === 'mensagens' ? f.query(f.collection(db, c), f.orderBy('criadoEm', 'desc'), f.limit(500)) : f.collection(db, c);
+        const ref = c === 'mensagens' ? f.query(this.col(c), f.orderBy('criadoEm', 'desc'), f.limit(500)) : this.col(c);
         f.onSnapshot(ref, snap => {
           const rows = snap.docs.map(d => ({ ...d.data(), id: d.id }));
           this.data[c] = c === 'mensagens' ? rows.reverse() : rows;
           if (!this.loaded[c]) { this.loaded[c] = true; if (--pending === 0) resolve(); }
           this.emit();
         }, err => {
-          toast(`Sem acesso a "${c}": ${err.code === 'permission-denied' ? 'confira as regras do Firestore e se seu e-mail está liberado' : err.message}`, 'danger');
+          toast(err.code === 'permission-denied' ? 'Você não tem mais acesso a este escritório. Fale com quem administra.' : `Erro ao carregar "${c}": ${err.message}`, 'danger');
           if (!this.loaded[c]) { this.loaded[c] = true; if (--pending === 0) resolve(); }
         });
       });
@@ -263,22 +267,103 @@ const Store = {
     const id = obj.id || uid();
     const doc = { ...obj, id, criadoEm: obj.criadoEm || Date.now(), atualizadoEm: Date.now() };
     if (this.mode === 'local') { this.data[c].push(doc); this.persist(); this.emit(); }
-    else { const { db, f } = this.fb; const { id: _, ...rest } = doc; await f.setDoc(f.doc(db, c, id), clean(rest)); }
+    else { const { id: _, ...rest } = doc; await this.fb.f.setDoc(this.ref(c, id), clean(rest)); }
     return id;
   },
   async update(c, id, patch) {
     patch = { ...patch, atualizadoEm: Date.now() };
     if (this.mode === 'local') { const it = this.get(c, id); if (it) Object.assign(it, patch); this.persist(); this.emit(); }
-    else { const { db, f } = this.fb; await f.updateDoc(f.doc(db, c, id), clean(patch)); }
+    else { await this.fb.f.updateDoc(this.ref(c, id), clean(patch)); }
   },
   async remove(c, id) {
     if (this.mode === 'local') { this.data[c] = this.data[c].filter(x => x.id !== id); this.persist(); this.emit(); }
-    else { const { db, f } = this.fb; await f.deleteDoc(f.doc(db, c, id)); }
+    else { await this.fb.f.deleteDoc(this.ref(c, id)); }
   },
 };
 /* Firestore não aceita undefined */
 function clean(o) { return JSON.parse(JSON.stringify(o, (k, v) => (v === undefined ? null : v))); }
 async function safe(p, okMsg) { try { await p; if (okMsg) toast(okMsg); } catch (e) { toast('Não foi possível salvar: ' + (e.message || e), 'danger'); } }
+
+/* ---------------- escritório (modo Firebase) ---------------- */
+const meuEmail = () => String(me?.email || '').toLowerCase();
+const officeName = () => Store.esc?.nome || OFFICE;
+const isAdmin = () => Store.mode !== 'firebase' || (Store.esc?.admins || []).includes(meuEmail());
+const isDono = m => Store.mode === 'firebase' && !!m?.email && m.email === Store.esc?.donoEmail;
+const isAdminEmail = e => (Store.esc?.admins || []).includes(String(e || '').toLowerCase());
+const SITE_URL = () => location.origin + location.pathname;
+async function acharEscritorio() {
+  const { db, f } = fb;
+  try {
+    const conv = await f.getDoc(f.doc(db, 'convites', meuEmail()));
+    if (!conv.exists()) return null;
+    const eid = conv.data().eid;
+    try { const e = await f.getDoc(f.doc(db, 'escritorios', eid)); if (e.exists()) return eid; }
+    catch (e) { if (e.code !== 'permission-denied') throw e; }
+    // convite antigo de um escritório do qual a pessoa saiu: apaga para ela poder criar ou receber outro
+    try { await f.deleteDoc(f.doc(db, 'convites', meuEmail())); } catch { /* ok */ }
+    return null;
+  } catch (e) { if (e.code === 'permission-denied') return null; throw e; }
+}
+async function criarEscritorio(nome) {
+  const { db, f } = fb; const email = meuEmail(); const eid = uid();
+  await f.setDoc(f.doc(db, 'escritorios', eid), { nome, donoUid: fb.auth.currentUser.uid, donoEmail: email, membros: [email], admins: [email], criadoEm: Date.now() });
+  await f.setDoc(f.doc(db, 'convites', email), { eid, por: email, criadoEm: Date.now() });
+  return eid;
+}
+async function convidar({ nome, email, cargo, cor, admin }) {
+  const { db, f } = fb; email = String(email || '').trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error('E-mail inválido');
+  try { await f.setDoc(f.doc(db, 'convites', email), { eid: Store.eid, por: meuEmail(), criadoEm: Date.now() }); }
+  catch (e) { throw new Error(e.code === 'permission-denied' ? 'Esse e-mail já faz parte de outro escritório na Pauta.' : e.message); }
+  await f.updateDoc(f.doc(db, 'escritorios', Store.eid), { membros: f.arrayUnion(email), ...(admin ? { admins: f.arrayUnion(email) } : {}) });
+  const existe = Store.data.equipe.find(m => (m.email || '').toLowerCase() === email);
+  if (!existe) await Store.add('equipe', { nome: nome || email.split('@')[0], email, cargo: cargo || '', cor: cor || CORES[Store.data.equipe.length % CORES.length], convidadoPor: quemSouAgora() });
+  return email;
+}
+async function removerDaEquipe(m) {
+  if (Store.mode === 'firebase' && m.email) {
+    const { db, f } = fb; const email = m.email.toLowerCase();
+    if (email === Store.esc?.donoEmail) throw new Error('Quem criou o escritório não pode ser removido.');
+    await f.updateDoc(f.doc(db, 'escritorios', Store.eid), { membros: f.arrayRemove(email), admins: f.arrayRemove(email) });
+    try { await f.deleteDoc(f.doc(db, 'convites', email)); } catch { /* já não existia */ }
+  }
+  await Store.remove('equipe', m.id);
+}
+async function definirAdmin(email, admin) {
+  const { db, f } = fb;
+  await f.updateDoc(f.doc(db, 'escritorios', Store.eid), { admins: admin ? f.arrayUnion(email) : f.arrayRemove(email) });
+}
+const quemSouAgora = () => Store.data.equipe.find(m => (m.email || '').toLowerCase() === meuEmail())?.nome || me?.nome || '';
+function conviteTexto(email) {
+  return `Oi! Te adicionei na Pauta do escritório ${officeName()}.\nEntre em ${SITE_URL()} e clique em "Entrar com Google" usando o e-mail ${email}.`;
+}
+function conviteModal(email) {
+  const t = conviteTexto(email);
+  openModal(`${modalHead('Convite criado')}
+    <div class="modal-body">
+      <p><b>${esc(email)}</b> já pode entrar. Mande a mensagem abaixo para a pessoa (WhatsApp, e-mail…):</p>
+      <pre class="code" id="convite-texto" style="white-space:pre-wrap">${esc(t)}</pre>
+    </div>
+    <div class="modal-foot"><button class="btn" data-act="close-modal">Fechar</button><button class="btn primary" data-act="copy-convite">${ICON.copy}Copiar mensagem</button></div>`, null, 'sm');
+}
+
+/* Dados do modo local que ficaram neste aparelho */
+function dadosLocais() {
+  if (ls.get('pauta-local-migrado', false)) return null;
+  const s = ls.get(LS_LOCAL, null); const d = s?.data;
+  if (!d || !((d.casos || []).length || (d.agenda || []).length)) return null;
+  return d;
+}
+async function migrarLocal() {
+  const d = dadosLocais(); if (!d) return;
+  const eu = meMember(); const localEu = ls.get(LS_LOCAL_EU, null);
+  const mapa = id => { if (!id) return ''; if (id === localEu) return eu?.id || ''; const lm = (d.equipe || []).find(m => m.id === id); const fm = lm && Store.data.equipe.find(m => m.nome.trim().toLowerCase() === lm.nome.trim().toLowerCase()); return fm?.id || ''; };
+  const ids = {}; let n = 0;
+  for (const c of d.casos || []) { const { id, ...rest } = c; const nid = await Store.add('casos', { ...rest, responsavelId: mapa(c.responsavelId) }); ids[id] = nid; n++; }
+  for (const e of d.agenda || []) { const { id, ...rest } = e; await Store.add('agenda', { ...rest, responsavelId: mapa(e.responsavelId), casoId: ids[e.casoId] || '' }); n++; }
+  ls.set('pauta-local-migrado', true);
+  toast(`${(d.casos || []).length} casos e ${(d.agenda || []).length} compromissos enviados para o escritório`);
+}
 
 /* ---------------- sessão ---------------- */
 let me = null;     // { email, nome, foto }
@@ -365,7 +450,7 @@ function shell() {
   return `
   <div class="app">
     <aside class="rail" aria-label="Navegação principal">
-      <div class="brand"><span class="brand-mark">§</span><div><div class="brand-name">Pauta</div><div class="brand-office">${esc(OFFICE)}</div></div></div>
+      <div class="brand"><span class="brand-mark">§</span><div><div class="brand-name">Pauta</div><div class="brand-office">${esc(officeName())}</div></div></div>
       <nav class="rail-nav">${NAV.map(([k, l]) => `<button class="nav-btn ${ui.view === k ? 'on' : ''}" data-act="nav" data-v="${k}" ${ui.view === k ? 'aria-current="page"' : ''}>${ICON[k]}<span>${l}</span>${navN(k)}</button>`).join('')}</nav>
       <div class="rail-foot">${Store.mode === 'local' ? `<span class="demo-tag">${IS_ARTIFACT ? 'Modo demonstração' : 'Modo local'}</span>` : ''}<span>${esc(me?.localId ? m.nome : (m.email || ''))}</span></div>
     </aside>
@@ -379,7 +464,7 @@ function shell() {
         </div>
       </header>
       ${Store.mode === 'local' && ui.view !== 'chat' ? `<div class="demo-banner">${ICON.info}<span>${IS_ARTIFACT ? 'Dados de exemplo, salvos só neste navegador.' : 'Tudo fica salvo só neste navegador. Para a equipe usar junto, de qualquer aparelho, falta ligar o Firebase (README). Faça backups pelo menu da conta.'}</span></div>` : ''}
-      ${!meMember() && Store.mode === 'firebase' ? `<div class="demo-banner">${ICON.info}<span>Seu e-mail ainda não está na equipe. Adicione-se na aba Equipe para receber marcações.</span></div>` : ''}
+      ${Store.mode === 'firebase' && dadosLocais() ? `<div class="demo-banner">${ICON.info}<span>Este aparelho tem ${dadosLocais().casos?.length || 0} casos e ${dadosLocais().agenda?.length || 0} compromissos do modo local (antes do login). Quer mandar para o escritório?</span><button class="btn small" data-act="migrar-local">Enviar</button><button class="btn small ghost" data-act="ignorar-local">Ignorar</button></div>` : ''}
       <main class="content" id="view">${renderView()}</main>
     </div>
     <nav class="tabbar" aria-label="Navegação">${NAV.map(([k, l]) => `<button class="tab-btn ${ui.view === k ? 'on' : ''}" data-act="nav" data-v="${k}">${ICON[k]}<span>${l}</span>${navN(k)}</button>`).join('')}</nav>
@@ -928,9 +1013,9 @@ function statsFor(m) {
 function viewEquipe() {
   const eq = [...Store.data.equipe].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
   return `
-  <div class="toolbar" style="margin-bottom:16px"><p class="hint" style="flex:1;min-width:200px">Toque em alguém para ver tudo que está no nome da pessoa: casos, prazos e agenda.</p><button class="btn primary" data-act="novo-membro">${ICON.plus}Adicionar pessoa</button></div>
+  <div class="toolbar" style="margin-bottom:16px"><p class="hint" style="flex:1;min-width:200px">${Store.mode === 'firebase' ? (isAdmin() ? 'Convide as pessoas pelo e-mail Google delas. Toque em alguém para ver tudo que está no nome da pessoa.' : 'Toque em alguém para ver tudo que está no nome da pessoa. Só administradores convidam pessoas.') : 'Toque em alguém para ver tudo que está no nome da pessoa: casos, prazos e agenda.'}</p>${isAdmin() ? `<button class="btn primary" data-act="novo-membro">${ICON.plus}${Store.mode === 'firebase' ? 'Convidar pessoa' : 'Adicionar pessoa'}</button>` : ''}</div>
   ${eq.length ? `<div class="team-grid">${eq.map(m => { const s = statsFor(m); return `<button class="member-card" data-act="open-membro" data-id="${esc(m.id)}">
-    <div class="member-top">${avatar(m)}<div style="min-width:0"><b>${esc(m.nome)}${meMember()?.id === m.id ? ' <span class="tag adm">você</span>' : ''}</b><small>${esc(m.cargo || 'Sem cargo')}</small></div></div>
+    <div class="member-top">${avatar(m)}<div style="min-width:0"><b>${esc(m.nome)}${meMember()?.id === m.id ? ' <span class="tag adm">você</span>' : ''}</b><small>${esc(m.cargo || 'Sem cargo')}${Store.mode === 'firebase' && isAdminEmail(m.email) ? ' · admin' : ''}</small>${Store.mode === 'firebase' && !m.entrouEm ? '<span class="tag ia">convite pendente</span>' : ''}</div></div>
     <div class="member-stats"><div><b>${s.casos}</b><small>casos ativos</small></div><div><b class="${s.urg ? 'alert' : ''}">${s.urg}</b><small>urgentes</small></div><div><b>${s.agenda}</b><small>na agenda</small></div></div>
   </button>`; }).join('')}</div>` : `<div class="empty"><h3>Equipe vazia</h3><p>Adicione as pessoas do escritório para distribuir casos e compromissos.</p></div>`}`;
 }
@@ -945,7 +1030,7 @@ function viewMembro(m) {
   return `
   <button class="back" data-act="back-equipe">${ICON.left}Equipe</button>
   <div class="profile-head">${avatar(m, 'lg')}<div style="min-width:0"><h2>${esc(m.nome)}</h2><div class="sub">${esc(m.cargo || 'Sem cargo')}${m.email ? ' · ' + esc(m.email) : ''}</div></div>
-    <div class="profile-actions">${!isMe && meMember() ? `<button class="btn small" data-act="dm" data-id="${esc(m.id)}">${ICON.chat}Mensagem</button>` : ''}<button class="btn small" data-act="novo-evento" data-v="${t}" data-resp="${esc(m.id)}">${ICON.calendario}Marcar compromisso</button><button class="btn small ghost" data-act="edit-membro" data-id="${esc(m.id)}">${ICON.edit}Editar</button></div></div>
+    <div class="profile-actions">${!isMe && meMember() ? `<button class="btn small" data-act="dm" data-id="${esc(m.id)}">${ICON.chat}Mensagem</button>` : ''}<button class="btn small" data-act="novo-evento" data-v="${t}" data-resp="${esc(m.id)}">${ICON.calendario}Marcar compromisso</button>${isAdmin() || isMe ? `<button class="btn small ghost" data-act="edit-membro" data-id="${esc(m.id)}">${ICON.edit}Editar</button>` : ''}${Store.mode === 'firebase' && !m.entrouEm && isAdmin() ? `<button class="btn small ghost" data-act="reenviar-convite" data-v="${esc(m.email)}">${ICON.copy}Mensagem do convite</button>` : ''}</div></div>
   <div class="section-h"><h3>Casos sob responsabilidade</h3><small>${casos.length} ativos · ${feitos.length} cumpridos</small></div>
   <div class="case-list" role="list">${casos.length ? casos.map(caseRow).join('') : '<div class="empty" style="padding:24px"><p>Nenhum caso ativo.</p></div>'}</div>
   <div class="section-h"><h3>Próximos compromissos</h3><small>${prox.length}</small></div>
@@ -1110,19 +1195,23 @@ function eventModal(e, preset = {}) {
 
 function memberModal(m) {
   const edit = !!m; m = m || { cor: CORES[Store.data.equipe.length % CORES.length] };
+  const fbm = Store.mode === 'firebase';
+  const souEu = edit && meMember()?.id === m.id;
   openModal(`
   <form id="f-membro" data-id="${esc(m.id || '')}">
-    ${modalHead(edit ? 'Editar pessoa' : 'Adicionar à equipe')}
+    ${modalHead(edit ? 'Editar pessoa' : fbm ? 'Convidar para o escritório' : 'Adicionar à equipe')}
     <div class="modal-body">
-      <label class="field"><span>Nome</span><input name="nome" required value="${esc(m.nome || '')}"></label>
+      ${fbm && !edit ? `<label class="field"><span>E-mail Google da pessoa</span><input name="email" type="email" required autocomplete="off" placeholder="nome@gmail.com"></label>` : ''}
+      <label class="field"><span>Nome</span><input name="nome" ${fbm && !edit ? '' : 'required'} value="${esc(m.nome || '')}" placeholder="${fbm && !edit ? 'Opcional — a pessoa pode ajustar depois' : ''}"></label>
       <div class="grid2">
         <label class="field"><span>Cargo</span><input name="cargo" value="${esc(m.cargo || '')}" placeholder="Advogada, estagiário…"></label>
-        <label class="field"><span>E-mail Google</span><input name="email" type="email" value="${esc(m.email || '')}" placeholder="para login e marcações"></label>
+        ${fbm ? (edit ? `<div class="field"><span>E-mail Google</span><input value="${esc(m.email || '')}" disabled></div>` : '') : `<label class="field"><span>E-mail</span><input name="email" type="email" value="${esc(m.email || '')}" placeholder="opcional"></label>`}
       </div>
-      <p class="hint">O e-mail liga a pessoa ao login: é assim que o sininho sabe o que é dela. Para ela conseguir entrar, o e-mail também precisa estar liberado nas regras do Firestore.</p>
+      ${fbm && isAdmin() && !isDono(m) ? `<label class="check"><input type="checkbox" name="admin" ${edit && isAdminEmail(m.email) ? 'checked' : ''}> Administrador (pode convidar e remover pessoas)</label>` : ''}
+      ${fbm && !edit ? '<p class="hint">A pessoa entra com o Google usando esse e-mail e já cai neste escritório, vendo os mesmos processos, agenda e chat.</p>' : ''}
       <div class="field"><span>Cor</span><div class="color-row">${CORES.map((c, i) => `<label><input type="radio" name="cor" value="${c}" ${c === m.cor ? 'checked' : ''} aria-label="Cor ${i + 1}"><span style="--c:${c}"></span></label>`).join('')}</div></div>
     </div>
-    <div class="modal-foot">${edit ? `<button type="button" class="btn danger" data-act="del-membro" data-id="${esc(m.id)}" style="margin-right:auto">${ICON.trash}Remover</button>` : ''}<button type="button" class="btn" data-act="close-modal">Cancelar</button><button type="submit" class="btn primary">${edit ? 'Salvar' : 'Adicionar'}</button></div>
+    <div class="modal-foot">${edit && isAdmin() && !souEu && !isDono(m) ? `<button type="button" class="btn danger" data-act="del-membro" data-id="${esc(m.id)}" style="margin-right:auto">${ICON.trash}Remover</button>` : ''}<button type="button" class="btn" data-act="close-modal">Cancelar</button><button type="submit" class="btn primary">${edit ? 'Salvar' : fbm ? 'Convidar' : 'Adicionar'}</button></div>
   </form>`, null, 'sm');
 }
 
@@ -1262,6 +1351,7 @@ document.addEventListener('click', async ev => {
       root.dataset.theme = dark ? 'light' : 'dark'; ls.set('pauta-tema', root.dataset.theme); ui.menu = false; return refresh();
     }
     case 'logout': ui.menu = false; return logout();
+    case 'recarregar': return location.reload();
     case 'restore-backup': ui.menu = false; refresh(); return $('#backup-file')?.click();
     case 'reset-demo': ui.menu = false; refresh(); return confirmModal('Apagar o que você mexeu e voltar aos dados de exemplo?', 'Restaurar', () => { Store.resetDemo(); toast('Dados de exemplo restaurados'); });
     case 'import': ui.menu = false; refresh(); return importModal();
@@ -1319,8 +1409,12 @@ document.addEventListener('click', async ev => {
     case 'open-membro': ui.membroId = id; refresh(); return window.scrollTo(0, 0);
     case 'back-equipe': ui.membroId = null; return refresh();
     case 'edit-membro': return memberModal(member(id));
-    case 'del-membro': closeModal(); return confirmModal('Remover esta pessoa da equipe? Os casos e compromissos dela ficam sem responsável.', 'Remover', async () => {
-      await safe(Store.remove('equipe', id), 'Pessoa removida'); ui.membroId = null; refresh(); });
+    case 'copy-convite': { const t = $('#convite-texto')?.innerText || ''; try { await navigator.clipboard.writeText(t); toast('Mensagem copiada'); } catch { const r = document.createRange(); r.selectNodeContents($('#convite-texto')); getSelection().removeAllRanges(); getSelection().addRange(r); toast('Texto selecionado: copie com Ctrl+C'); } return; }
+    case 'reenviar-convite': return conviteModal(v);
+    case 'migrar-local': return safe(migrarLocal()).then(refresh);
+    case 'ignorar-local': ls.set('pauta-local-migrado', true); return refresh();
+    case 'del-membro': closeModal(); return confirmModal(Store.mode === 'firebase' ? 'Remover esta pessoa do escritório? Ela perde o acesso, e os casos e compromissos dela ficam sem responsável.' : 'Remover esta pessoa da equipe? Os casos e compromissos dela ficam sem responsável.', 'Remover', async () => {
+      await safe(removerDaEquipe(member(id)), 'Pessoa removida'); ui.membroId = null; refresh(); });
     case 'dm': { const m = meMember(); if (!m) return; ui.canal = dmKey(m.id, id); return go('chat'); }
     case 'canal': ui.canal = v; lastMsgCount = -1; return refresh();
 
@@ -1366,6 +1460,13 @@ document.addEventListener('submit', async ev => {
   const fd = Object.fromEntries(new FormData(f).entries());
   const quem = meMember()?.nome || me?.nome || '';
   switch (f.id) {
+    case 'f-criar-esc': {
+      const nome = (fd.nome || '').trim(); if (!nome) return;
+      f.querySelector('button[type=submit]').disabled = true;
+      try { const eid = await criarEscritorio(nome); await entrarEscritorio(eid); toast('Escritório criado. Agora convide a equipe pela aba Equipe.'); }
+      catch (e) { showCriarEscritorio('Não foi possível criar: ' + e.message); }
+      return;
+    }
     case 'f-start': { const nome = (fd.nome || '').trim(); if (nome) await startLocal(nome); return; }
     case 'f-caso': {
       const tipo = fd.tipo, editId = f.dataset.id;
@@ -1398,6 +1499,19 @@ document.addEventListener('submit', async ev => {
       return;
     }
     case 'f-membro': {
+      if (Store.mode === 'firebase') {
+        const editId = f.dataset.id;
+        if (!editId) {
+          closeModal();
+          try { const em = await convidar({ nome: (fd.nome || '').trim(), email: fd.email, cargo: (fd.cargo || '').trim(), cor: fd.cor, admin: !!fd.admin }); conviteModal(em); }
+          catch (e) { toast(e.message, 'danger'); }
+          return;
+        }
+        const m = member(editId); closeModal();
+        await safe(Store.update('equipe', editId, { nome: fd.nome.trim(), cargo: (fd.cargo || '').trim(), cor: fd.cor || m.cor }), 'Dados atualizados');
+        if (isAdmin() && m.email && !isDono(m) && !!fd.admin !== isAdminEmail(m.email)) await safe(definirAdmin(m.email.toLowerCase(), !!fd.admin));
+        return;
+      }
       const editId = f.dataset.id; const email = (fd.email || '').trim().toLowerCase();
       if (email && Store.data.equipe.some(m => m.id !== editId && (m.email || '').toLowerCase() === email)) return toast('Já existe alguém com esse e-mail', 'danger');
       const obj = { nome: fd.nome.trim(), cargo: (fd.cargo || '').trim(), email, cor: fd.cor || CORES[0] };
@@ -1439,11 +1553,30 @@ function loginHTML(msg) {
     <p class="login-lede">Prazos, agenda, equipe e conversa do escritório num lugar só.</p>
     ${msg ? `<p class="login-msg">${esc(msg)}</p>` : ''}
     ${hasFb ? `<button class="btn google" data-act="login-google">${ICON.google}Entrar com Google</button>
+    <p class="hint">Primeira vez do escritório? Entre e crie a equipe. Foi convidado? Entre com o mesmo e-mail do convite.</p>
     ${CFG.allowDemo ? '<button class="btn ghost" data-act="login-demo">Abrir modo demonstração</button>' : ''}` : `
     <form id="f-start" class="field"><span>Seu nome</span><input id="start-nome" name="nome" required autocomplete="name" placeholder="Como a equipe te chama"><button class="btn primary" type="submit" style="margin-top:6px">Começar</button></form>
     <p class="hint">Por enquanto os dados ficam salvos neste navegador. O login com Google e o uso pela equipe toda ligam quando o <span class="mono">config.js</span> recebe os dados do Firebase (passo a passo no README).</p>`}
-    ${hasFb ? '<p class="login-foot">Acesso restrito à equipe. Dados de clientes ficam protegidos pelas regras do banco — só e-mails liberados leem e gravam.</p>' : ''}
+    ${hasFb ? '<p class="login-foot">Só quem foi convidado para o escritório vê os processos. Os dados ficam protegidos pelas regras do banco.</p>' : ''}
   </div></div>`;
+}
+function showCriarEscritorio(msg) {
+  const app = $('#app'); app.dataset.mode = 'onboard';
+  app.innerHTML = `<div class="login"><div class="login-card">
+    <div class="login-brand"><span class="brand-mark big">§</span><div><div class="login-title">Pauta</div><div class="login-office">${esc(meuEmail())}</div></div></div>
+    ${msg ? `<p class="login-msg">${esc(msg)}</p>` : ''}
+    <p class="login-lede">Este e-mail ainda não faz parte de nenhum escritório.</p>
+    <form id="f-criar-esc" class="field"><span>Nome do escritório</span><input id="esc-nome" name="nome" required value="${esc(OFFICE)}"><button class="btn primary" type="submit" style="margin-top:6px">Criar escritório e entrar</button></form>
+    <p class="hint">Você vira administrador e convida a equipe pela aba Equipe.</p>
+    <p class="login-foot">Foi convidado por alguém? Então não crie: peça para a pessoa conferir se convidou exatamente <b>${esc(meuEmail())}</b>, depois <button class="linkish" data-act="recarregar">tente de novo</button> ou <button class="linkish" data-act="logout">entre com outra conta</button>.</p>
+  </div></div>`;
+}
+function showCarregando(t) { const app = $('#app'); app.dataset.mode = 'loading'; app.innerHTML = `<div class="login"><p class="hint">${esc(t)}</p></div>`; }
+async function entrarEscritorio(eid) {
+  showCarregando('Carregando o escritório…');
+  await Store.initFirebase(fb, eid);
+  try { await ensureMember(); } catch (e) { toast('Não consegui criar seu perfil na equipe: ' + e.message, 'danger'); }
+  showApp();
 }
 function showLogin(msg) { const app = $('#app'); app.dataset.mode = 'login'; app.innerHTML = loginHTML(msg); }
 function showApp() {
@@ -1495,13 +1628,19 @@ async function loginGoogle() {
   }
 }
 async function logout() {
-  if (Store.mode === 'firebase' && fb) { await fb.a.signOut(fb.auth); location.reload(); return; }
+  if (fb) { await fb.a.signOut(fb.auth); location.reload(); return; }
   me = null; Store.mode = null; showLogin();
 }
 async function ensureMember() {
-  if (meMember()) return;
+  const m = meMember();
+  if (m) {
+    const patch = {}; if (!m.entrouEm) patch.entrouEm = Date.now(); if (me.foto && m.foto !== me.foto) patch.foto = me.foto;
+    if (!m.nome || m.nome === meuEmail().split('@')[0]) patch.nome = me.nome;
+    if (Object.keys(patch).length) await Store.update('equipe', m.id, patch);
+    return;
+  }
   const others = Store.data.equipe.length;
-  await Store.add('equipe', { nome: me.nome || me.email.split('@')[0], email: me.email.toLowerCase(), cargo: others ? '' : 'Administração', cor: CORES[others % CORES.length], foto: me.foto || '' });
+  await Store.add('equipe', { nome: me.nome || meuEmail().split('@')[0], email: meuEmail(), cargo: others ? '' : 'Administração', cor: CORES[others % CORES.length], foto: me.foto || '', entrouEm: Date.now() });
 }
 
 async function boot() {
@@ -1517,12 +1656,14 @@ async function boot() {
   fb.a.getRedirectResult(fb.auth).catch(() => {});
   fb.a.onAuthStateChanged(fb.auth, async user => {
     if (!user) return showLogin();
-    if (!isAllowed(user.email)) { await fb.a.signOut(fb.auth); return showLogin(`O e-mail ${user.email} não tem acesso. Peça para liberarem no config.js e nas regras do Firestore.`); }
+    if (!isAllowed(user.email)) { await fb.a.signOut(fb.auth); return showLogin(`O e-mail ${user.email} não tem acesso a esta Pauta.`); }
     me = { email: user.email, nome: user.displayName || user.email, foto: user.photoURL || '' };
-    $('#app').innerHTML = '<div class="login"><p class="hint">Carregando o escritório…</p></div>';
-    await Store.initFirebase(fb);
-    try { await ensureMember(); } catch { /* regras podem bloquear; o banner avisa */ }
-    showApp();
+    if (Store.mode === 'firebase') return; // já carregado
+    showCarregando('Procurando seu escritório…');
+    let eid;
+    try { eid = await acharEscritorio(); } catch (e) { return showLogin('Não consegui falar com o banco de dados: ' + e.message); }
+    if (!eid) return showCriarEscritorio();
+    await entrarEscritorio(eid);
   });
 }
 boot();

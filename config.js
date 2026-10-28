@@ -16,15 +16,14 @@ window.APP_CONFIG = {
   // Sites que podem mandar PDF direto para a Pauta (além de *.jus.br)
   origensAnexo: [],
 
-  firebase: null,
-  // firebase: {
-  //   apiKey: "COLE_AQUI",
-  //   authDomain: "seu-projeto.firebaseapp.com",
-  //   projectId: "seu-projeto",
-  //   storageBucket: "seu-projeto.appspot.com",
-  //   messagingSenderId: "000000000000",
-  //   appId: "1:000000000000:web:0000000000000000"
-  // },
+  firebase: {
+    apiKey: "AIzaSyD1yeocYdZaqi_AtdLqr5VM7ebR12LJ0hI",
+    authDomain: "pauta-coradelli.firebaseapp.com",
+    projectId: "pauta-coradelli",
+    storageBucket: "pauta-coradelli.firebasestorage.app",
+    messagingSenderId: "884802584687",
+    appId: "1:884802584687:web:1664420fbefdf8a717cd9a"
+  },
 
   // Quem pode entrar. Deixe as duas opções vazias para liberar qualquer conta Google (não recomendado).
   allowedEmails: [

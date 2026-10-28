@@ -1,37 +1,59 @@
 rules_version = '2';
 
-// Regras do Firestore da Pauta.
-// Cole este arquivo em: Firebase Console → Firestore Database → Regras → Publicar.
-// Só quem estiver na lista abaixo (login Google com e-mail verificado) lê e grava.
-// Mantenha a mesma lista no config.js.
+// Regras do Firestore da Pauta — modelo "escritório + convites".
+// Quem cria o escritório vira administrador. Administradores convidam pelo e-mail Google.
+// Só quem está na lista "membros" do escritório lê ou grava os dados dele.
+// Cole em: Firebase Console → Firestore Database → Regras → Publicar.
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    function autorizado() {
-      return request.auth != null
-        && request.auth.token.email_verified == true
-        && request.auth.token.email.lower() in [
-          'seu-email@gmail.com'
-          // , 'colega@gmail.com'
-          // , 'outra.pessoa@gmail.com'
-        ];
-      // Para liberar um domínio inteiro, troque a lista por:
-      //   && request.auth.token.email.matches('.*@seudominio[.]com[.]br$');
+    function logado() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+    function meuEmail() {
+      return request.auth.token.email.lower();
+    }
+    function esc(eid) {
+      return get(/databases/$(database)/documents/escritorios/$(eid)).data;
+    }
+    function membro(eid) {
+      return logado() && exists(/databases/$(database)/documents/escritorios/$(eid)) && meuEmail() in esc(eid).membros;
+    }
+    function admin(eid) {
+      return logado() && exists(/databases/$(database)/documents/escritorios/$(eid)) && meuEmail() in esc(eid).admins;
     }
 
-    match /equipe/{id}    { allow read, write: if autorizado(); }
-    match /casos/{id}     { allow read, write: if autorizado(); }
-    match /agenda/{id}    { allow read, write: if autorizado(); }
+    match /escritorios/{eid} {
+      allow get: if logado() && meuEmail() in resource.data.membros;
+      allow create: if logado()
+        && request.resource.data.donoUid == request.auth.uid
+        && request.resource.data.donoEmail == meuEmail()
+        && request.resource.data.membros == [meuEmail()]
+        && request.resource.data.admins == [meuEmail()];
+      // Só administradores alteram; o dono nunca sai da lista nem perde o admin.
+      allow update: if logado() && meuEmail() in resource.data.admins
+        && request.resource.data.donoUid == resource.data.donoUid
+        && request.resource.data.donoEmail == resource.data.donoEmail
+        && resource.data.donoEmail in request.resource.data.membros
+        && resource.data.donoEmail in request.resource.data.admins;
+      allow delete: if false;
 
-    // Mensagens: qualquer pessoa autorizada lê; só cria em nome próprio e não edita a dos outros.
-    match /mensagens/{id} {
-      allow read: if autorizado();
-      allow create: if autorizado() && request.resource.data.texto is string && request.resource.data.texto.size() <= 4000;
-      allow update, delete: if false;
+      match /{colecao}/{id} {
+        allow read, write: if colecao in ['equipe', 'casos', 'agenda', 'mensagens'] && membro(eid);
+      }
     }
 
-    // Qualquer outra coleção fica fechada.
-    match /{document=**} { allow read, write: if false; }
+    // convites/{email} → { eid }: diz a cada pessoa em qual escritório ela entra.
+    match /convites/{email} {
+      allow get: if logado() && email == meuEmail();
+      allow create: if logado() && admin(request.resource.data.eid);
+      allow update: if logado() && admin(resource.data.eid) && admin(request.resource.data.eid);
+      allow delete: if logado() && (email == meuEmail() || admin(resource.data.eid));
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
   }
 }

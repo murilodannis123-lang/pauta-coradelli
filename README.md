@@ -15,6 +15,15 @@ Sem o Firebase configurado, ele abre em **modo local**: começa zerado, pede seu
 | `firestore.rules` | **Você edita:** regra de segurança do banco (cole no Firebase) |
 | `exemplo-importacao.json` | Formato para importar casos em lote / pela IA |
 
+## Escritório, login e convites (como está configurado)
+
+- Projeto Firebase: **pauta-coradelli** (conta murilodannis123@gmail.com). Login Google ativado, domínio `murilodannis123-lang.github.io` autorizado e regras de `firestore.rules` publicadas.
+- **Primeiro acesso**: a pessoa entra com Google. Se o e-mail dela não estiver em nenhum escritório, aparece "Criar escritório". Quem cria vira **administrador**.
+- **Convidar**: aba Equipe → **Convidar pessoa** → e-mail Google da pessoa. O site gera a mensagem pronta para mandar. A pessoa entra com esse e-mail e já cai no mesmo escritório, vendo os mesmos processos, agenda e chat, em qualquer aparelho.
+- Só administradores convidam, removem ou tornam alguém administrador. Quem criou o escritório não pode ser removido.
+- Ao entrar num aparelho que tinha dados do **modo local**, aparece a opção **Enviar para o escritório**.
+- Não é mais preciso listar e-mails no `config.js` nem nas regras: o acesso é controlado pela lista de membros de cada escritório.
+
 ## O que tem
 
 - **Login Google**, só para e-mails liberados (trava no banco, não só na tela).
