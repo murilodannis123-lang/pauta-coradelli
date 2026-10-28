@@ -1,0 +1,29 @@
+[
+  {
+    "tipo": "judicial",
+    "numero": "5003127-77.2025.4.03.6105",
+    "autor": "Nome do autor",
+    "reu": "Instituto Nacional do Seguro Social – INSS",
+    "representa": "autor",
+    "area": "Previdenciário",
+    "orgao": "TRF3 · 1ª Vara Federal",
+    "tipoPrazo": "Manifestação",
+    "prazo": "2026-11-05",
+    "responsavel": "email-da-pessoa@gmail.com",
+    "andamento": "Juntado laudo pericial. Intimação para manifestação.",
+    "resumo": "Opcional: resumo do processo.",
+    "origem": "ia"
+  },
+  {
+    "tipo": "administrativo",
+    "numero": "NB 000.000.000-0",
+    "autor": "Nome do segurado",
+    "reu": "INSS",
+    "area": "Previdenciário",
+    "orgao": "CRPS · Junta de Recursos",
+    "tipoPrazo": "Recurso administrativo (CRPS)",
+    "prazo": "2026-11-20",
+    "responsavel": "Nome da pessoa da equipe",
+    "andamento": "Indeferimento recebido."
+  }
+]

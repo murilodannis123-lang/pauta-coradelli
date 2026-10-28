@@ -1,0 +1,37 @@
+rules_version = '2';
+
+// Regras do Firestore da Pauta.
+// Cole este arquivo em: Firebase Console → Firestore Database → Regras → Publicar.
+// Só quem estiver na lista abaixo (login Google com e-mail verificado) lê e grava.
+// Mantenha a mesma lista no config.js.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function autorizado() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email.lower() in [
+          'seu-email@gmail.com'
+          // , 'colega@gmail.com'
+          // , 'outra.pessoa@gmail.com'
+        ];
+      // Para liberar um domínio inteiro, troque a lista por:
+      //   && request.auth.token.email.matches('.*@seudominio[.]com[.]br$');
+    }
+
+    match /equipe/{id}    { allow read, write: if autorizado(); }
+    match /casos/{id}     { allow read, write: if autorizado(); }
+    match /agenda/{id}    { allow read, write: if autorizado(); }
+
+    // Mensagens: qualquer pessoa autorizada lê; só cria em nome próprio e não edita a dos outros.
+    match /mensagens/{id} {
+      allow read: if autorizado();
+      allow create: if autorizado() && request.resource.data.texto is string && request.resource.data.texto.size() <= 4000;
+      allow update, delete: if false;
+    }
+
+    // Qualquer outra coleção fica fechada.
+    match /{document=**} { allow read, write: if false; }
+  }
+}
