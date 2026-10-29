@@ -3,15 +3,17 @@
   ---------------------
   1) Crie um projeto no Firebase e um "App da Web" (passo a passo no README.md).
   2) Cole abaixo o objeto firebaseConfig que o Firebase mostrar.
-  3) Liste quem pode entrar (e-mails Google). Repita a mesma lista no firestore.rules —
-     a trava de verdade é a regra do Firestore; esta lista só evita a tela abrir para quem não tem acesso.
+  3) O acesso é controlado pelas regras do Firestore (firestore.rules): cada escritório só é lido
+     por quem está na lista de membros dele. Não é preciso listar e-mails aqui.
 
   Enquanto "firebase" estiver null, o site abre em MODO LOCAL:
   começa zerado e salva tudo só no navegador de quem usa.
 */
 window.APP_CONFIG = {
-  officeName: 'Advocacia Coradelli',
-  advogada: 'Dra. Cristiane Paiva Coradelli Abate', // usada no resumo para identificar o cliente
+  officeName: '', // nome padrão; cada escritório define o seu dentro do app
+
+  // E-mail para pedidos sobre dados pessoais da conta na Pauta (aparece em "Minha conta"). [PREENCHER]
+  contatoPrivacidade: '',
 
   // Sites que podem mandar PDF direto para a Pauta (além de *.jus.br)
   origensAnexo: [],
@@ -25,12 +27,6 @@ window.APP_CONFIG = {
     appId: "1:884802584687:web:1664420fbefdf8a717cd9a"
   },
 
-  // Quem pode entrar. Deixe as duas opções vazias para liberar qualquer conta Google (não recomendado).
-  allowedEmails: [
-    // 'seu-email@gmail.com',
-    // 'colega@gmail.com',
-  ],
-  allowedDomain: '', // ex.: 'coradelli.adv.br' libera todo e-mail desse domínio
 
   // Mostra o botão "modo demonstração" mesmo com o Firebase configurado
   allowDemo: false,

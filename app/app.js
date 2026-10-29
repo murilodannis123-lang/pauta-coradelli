@@ -6,7 +6,9 @@
    ===================================================================== */
 
 const CFG = window.APP_CONFIG || {};
-const OFFICE = CFG.officeName || 'Advocacia Coradelli';
+const OFFICE = CFG.officeName || 'Pauta';
+const TERMOS_V = '2026-10-29'; // versão dos Termos de Uso e da Política de Privacidade
+const LINK_TERMOS = '../termos.html', LINK_PRIVACIDADE = '../privacidade.html';
 const IS_ARTIFACT = !!CFG.artifactPreview;
 const LS_DEMO = 'pauta-demo-v1';
 const LS_LOCAL = 'pauta-local-v1';
@@ -27,9 +29,12 @@ const daysBetween = (a, b) => Math.round((parseISO(b) - parseISO(a)) / 864e5);
 const nowHM = () => { const d = new Date(); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 const firstName = n => String(n || '').trim().split(/\s+/)[0] || '';
 const trunc = (s, n) => (s = String(s || ''), s.length > n ? s.slice(0, n - 1) + '…' : s);
+const _mem = {};
+const podeGuardar = k => !window.PautaConsent || window.PautaConsent.permitido(k);
 const ls = {
-  get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
-  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* armazenamento indisponível */ } },
+  get(k, d) { if (!podeGuardar(k)) return k in _mem ? _mem[k] : d; try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { if (!podeGuardar(k)) { _mem[k] = v; return; } try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* armazenamento indisponível */ } },
+  del(k) { delete _mem[k]; try { localStorage.removeItem(k); } catch { /* ok */ } },
 };
 const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
 const DOW = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
@@ -380,13 +385,6 @@ const seenKey = () => `pauta-vistos-${me?.email || 'x'}`;
 const chatSeenKey = () => `pauta-chat-${me?.email || 'x'}`;
 let seen = new Set();
 
-function isAllowed(email) {
-  const e = String(email || '').toLowerCase();
-  const list = (CFG.allowedEmails || []).map(x => x.toLowerCase());
-  const dom = (CFG.allowedDomain || '').toLowerCase();
-  if (!list.length && !dom) return true;
-  return list.includes(e) || (dom && e.endsWith('@' + dom));
-}
 
 /* ---------------- notificações (sininho) ---------------- */
 function notifications() {
@@ -431,10 +429,8 @@ function markChatSeen(canal) { const o = ls.get(chatSeenKey(), {}); o[canal] = D
 /* ---------------- peças de interface ---------------- */
 function initials(n) { const p = String(n || '?').replace(/\(.*?\)/g, '').trim().split(/\s+/); return ((p[0]?.[0] || '?') + (p.length > 1 ? p[p.length - 1][0] : '')).toUpperCase(); }
 function avatar(m, cls = '') {
-  if (!m) return `<span class="av none ${cls}" title="Sem responsável">?</span>`;
-  const foto = m.foto || (me && m.email && m.email === me.email ? me.foto : '');
-  if (foto) return `<span class="av ${cls}" title="${esc(m.nome)}"><img src="${esc(foto)}" alt="" referrerpolicy="no-referrer"></span>`;
-  return `<span class="av ${cls}" style="background:${esc(m.cor || CORES[0])}" title="${esc(m.nome)}">${esc(initials(m.nome))}</span>`;
+  if (!m) return `<span class="av none ${cls}" role="img" aria-label="Sem responsável" title="Sem responsável"><span aria-hidden="true">?</span></span>`;
+  return `<span class="av ${cls}" style="background:${esc(m.cor || CORES[0])}" role="img" aria-label="${esc(m.nome)}" title="${esc(m.nome)}"><span aria-hidden="true">${esc(initials(m.nome))}</span></span>`;
 }
 const whoChip = m => m ? `<span class="who">${avatar(m, 'sm')}${esc(firstName(m.nome))}</span>` : '<span class="who">Sem responsável</span>';
 const stamp = (u, inline = false) => inline
@@ -468,7 +464,7 @@ function shell() {
       </header>
       ${Store.mode === 'local' && ui.view !== 'chat' ? `<div class="demo-banner">${ICON.info}<span>${IS_ARTIFACT ? 'Dados de exemplo, salvos só neste navegador.' : 'Tudo fica salvo só neste navegador. Para a equipe usar junto, de qualquer aparelho, falta ligar o Firebase (README). Faça backups pelo menu da conta.'}</span></div>` : ''}
       ${Store.mode === 'firebase' && dadosLocais() ? `<div class="demo-banner">${ICON.info}<span>Este aparelho tem ${dadosLocais().casos?.length || 0} casos e ${dadosLocais().agenda?.length || 0} compromissos do modo local (antes do login). Quer mandar para o escritório?</span><button class="btn small" data-act="migrar-local">Enviar</button><button class="btn small ghost" data-act="ignorar-local">Ignorar</button></div>` : ''}
-      <main class="content" id="view">${renderView()}</main>
+      <main class="content" id="conteudo" tabindex="-1">${renderView()}</main>
     </div>
     <nav class="tabbar" aria-label="Navegação">${NAV.map(([k, l]) => `<button class="tab-btn ${ui.view === k ? 'on' : ''}" data-act="nav" data-v="${k}">${ICON[k]}<span>${l}</span>${navN(k)}</button>`).join('')}</nav>
   </div>
@@ -492,8 +488,11 @@ function bellPanel(list) {
 function menuPanel(m) {
   const dark = document.documentElement.dataset.theme === 'dark' || (!document.documentElement.dataset.theme && matchMedia('(prefers-color-scheme: dark)').matches);
   return `<div class="pop-scrim" data-act="close-pop"></div>
-  <div class="pop" role="menu" aria-label="Conta">
+  <div class="pop" role="dialog" aria-label="Conta">
     <div class="menu-who">${avatar(m)}<div><b>${esc(m.nome)}</b><small>${esc(m.email || '')}</small></div></div>
+    ${Store.mode === 'firebase' ? `<button class="menu-item" data-act="minha-conta">${ICON.key}Minha conta e privacidade</button>
+    ${isAdmin() ? `<button class="menu-item" data-act="config-escritorio">${ICON.equipe}Dados do escritório</button>` : ''}` : ''}
+    <button class="menu-item" data-act="preferencias-privacidade">${ICON.info}Preferências de armazenamento</button>
     <button class="menu-item" data-act="theme">${ICON.moon}${dark ? 'Tema claro' : 'Tema escuro'}</button>
     <button class="menu-item" data-act="config-ia">${ICON.key}Configurar IA${iaCfg().key ? '' : ' (resumos)'}</button>
     <button class="menu-item" data-act="import">${ICON.up}Importar casos (JSON)</button>
@@ -535,7 +534,7 @@ function sortCases(list) {
 }
 function caseRow(c) {
   const u = urg(c), r = member(c.responsavelId);
-  return `<button class="case-row ${c.status === 'cumprido' ? 'done' : ''}" role="listitem" data-act="open-case" data-id="${esc(c.id)}">
+  return `<button class="case-row ${c.status === 'cumprido' ? 'done' : ''}" data-act="open-case" data-id="${esc(c.id)}">
     ${stamp(u)}
     <span style="min-width:0">
       <span class="case-num">${esc(c.numero || 'Sem número')}${c.tipo === 'administrativo' ? '<span class="tag adm">ADM</span>' : ''}${c.origem === 'ia' && !c.revisado ? `<span class="tag ia">${ICON.spark}revisar</span>` : ''}</span>
@@ -581,16 +580,16 @@ function viewPrazos() {
         <label class="check"><input type="checkbox" id="f-meus" ${ui.soMeus ? 'checked' : ''}> Só os meus</label>
       </div>
       ${iaPend ? `<div class="ia-queue">${ICON.spark}<span><b>${iaPend}</b> ${iaPend === 1 ? 'caso importado automaticamente aguarda' : 'casos importados automaticamente aguardam'} revisão humana.</span></div>` : ''}
-      <div class="case-list" role="list">${list.length ? list.map(caseRow).join('') : emptyMsg}</div>
+      <div class="case-list">${list.length ? list.map(caseRow).join('') : emptyMsg}</div>
     </section>
     <aside class="today-panel" aria-label="Hoje">
       <div class="panel">
-        <div class="panel-h"><h3>Hoje</h3><small>${esc(fmtDayLong(t))}</small></div>
+        <div class="panel-h"><h2>Hoje</h2><small>${esc(fmtDayLong(t))}</small></div>
         ${prazosHoje.map(c => `<button class="mini-ev" data-act="open-case" data-id="${esc(c.id)}"><span class="t" style="color:var(--danger)">FATAL</span><span><b>${esc(c.tipoPrazo || 'Prazo')} · ${esc(c.autor)}</b><small>${esc(member(c.responsavelId)?.nome || 'Sem responsável')}</small></span></button>`).join('')}
         ${hoje.length ? hoje.map(e => { const st = eventStatus(e); return `<button class="mini-ev ${st === 'finalizado' ? 'fin' : ''}" data-act="goto-day" data-v="${e.data}"><span class="t">${esc(e.inicio || 'dia')}</span><span><b>${esc(e.titulo)}</b><small>${esc(member(e.responsavelId)?.nome || '')} · ${STATUS_LABEL[st]}</small></span></button>`; }).join('') : (prazosHoje.length ? '' : '<p class="hint">Nada na agenda de hoje.</p>')}
         <button class="btn small ghost" data-act="novo-evento" data-v="${t}">${ICON.plus}Compromisso</button>
       </div>
-      ${carga.length ? `<div class="panel"><div class="panel-h"><h3>Carga da equipe</h3><small>casos ativos</small></div>
+      ${carga.length ? `<div class="panel"><div class="panel-h"><h2>Carga da equipe</h2><small>casos ativos</small></div>
         ${carga.map(x => `<div class="load-row">${avatar(x.m, 'sm')}<div style="min-width:0"><div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.m.nome)}</div><div class="load-bar"><i style="width:${(x.n / maxN) * 100}%"></i></div></div><span class="mono" title="${x.alert} urgentes">${x.n}${x.alert ? ` <span style="color:var(--danger)">·${x.alert}</span>` : ''}</span></div>`).join('')}
       </div>` : ''}
     </aside>
@@ -650,7 +649,7 @@ async function removerDocumento(casoId, docId) {
 }
 
 let _pdfjs = null;
-const PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+const PDFJS = new URL('../assets/vendor/pdfjs-3.11.174/', location.href).href;
 function loadPdfJs() {
   if (_pdfjs) return _pdfjs;
   _pdfjs = new Promise((res, rej) => {
@@ -699,7 +698,7 @@ const IA_KEY = 'pauta-ia';
 const iaCfg = () => ({ modelo: 'claude-sonnet-5-5', key: '', ...ls.get(IA_KEY, {}) });
 const LIMITE_TEXTO = 500000; // caracteres (~125 mil tokens)
 function promptResumo() {
-  const adv = CFG.advogada || 'a advogada do escritório';
+  const adv = (Store.esc?.advogadosResumo || '').trim() || 'os advogados do escritório';
   return `Você é assistente jurídico do escritório ${OFFICE}. Resuma o processo usando SOMENTE o conteúdo dos documentos fornecidos.
 
 Regras:
@@ -922,8 +921,8 @@ function drawerHTML() {
     <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn small" data-act="edit-case" data-id="${esc(c.id)}">${ICON.edit}Editar</button><button class="btn small danger" data-act="del-case" data-id="${esc(c.id)}">${ICON.trash}Excluir caso</button></div>`;
   }
   return `<div class="scrim" data-act="close-drawer"></div>
-  <aside class="drawer" role="dialog" aria-modal="true" aria-label="Detalhes do caso">
-    <header class="drawer-head">
+  <div class="drawer" role="dialog" aria-modal="true" aria-label="Detalhes do caso">
+    <div class="drawer-head">
       <div class="drawer-top"><span class="eyebrow">${c.tipo === 'administrativo' ? 'Processo administrativo' : 'Processo judicial'}${c.area ? ' · ' + esc(c.area) : ''}</span><button class="icon-btn" data-act="close-drawer" aria-label="Fechar">${ICON.x}</button></div>
       <div class="proc-num"><span class="mono">${esc(c.numero || 'Sem número')}</span>${c.numero ? `<button class="mini-btn" data-act="copy" data-text="${esc(c.numero)}">${ICON.copy}Copiar</button>` : ''}</div>
       <h2 class="drawer-title">${esc(c.autor)} <span class="vs">×</span> ${esc(c.reu)}</h2>
@@ -936,10 +935,10 @@ function drawerHTML() {
         <button class="btn small" data-act="novo-evento" data-v="${esc(c.prazo || todayISO())}" data-caso="${esc(c.id)}">${ICON.calendario}Agendar</button>
       </div>
       ${c.origem === 'ia' && !c.revisado ? `<div class="notice ia">${ICON.spark}<span>Cadastrado automaticamente. Confira número, partes e prazo no processo antes de confiar.</span><button class="btn small" data-act="revisado" data-id="${esc(c.id)}">${ICON.check}Conferido</button></div>` : ''}
-    </header>
+    </div>
     <nav class="drawer-tabs" aria-label="Seções do caso">${abas.map(([k, l, ic]) => `<button class="${ui.casoAba === k ? 'on' : ''}" data-act="case-tab" data-v="${k}">${ic}${l}</button>`).join('')}</nav>
     <div class="drawer-body" data-scroll="drawer">${body}</div>
-  </aside>`;
+  </div>`;
 }
 
 /* ---------------- CALENDÁRIO ---------------- */
@@ -977,7 +976,7 @@ function viewCalendario() {
   for (let i = 0; i < weeks * 7; i++) {
     const d = new Date(start); d.setDate(start.getDate() + i);
     const iso = toISO(d), it = map[iso] || { ev: [], pz: [] }, hol = holidayName(iso), w = d.getDay();
-    const items = [...it.pz.map(c => `<span class="cal-item prazo">Prazo · ${esc(firstName(c.autor))}</span>`), ...it.ev.map(e => `<span class="cal-item ${eventStatus(e) === 'finalizado' ? 'fin' : ''}" style="--c:${esc(member(e.responsavelId)?.cor || CORES[0])}">${e.inicio ? `<span class="mono">${esc(e.inicio)}</span> ` : ''}${esc(e.titulo)}</span>`)];
+    const items = [...it.pz.map(c => `<span class="cal-item prazo" title="Prazo fatal: ${esc(c.tipoPrazo || 'Prazo')} · ${esc(c.autor)} × ${esc(c.reu)}">${esc(c.tipoPrazo || 'Prazo')} · ${esc(firstName(c.autor))}</span>`), ...it.ev.map(e => `<span class="cal-item ${eventStatus(e) === 'finalizado' ? 'fin' : ''}" style="--c:${esc(member(e.responsavelId)?.cor || CORES[0])}">${e.inicio ? `<span class="mono">${esc(e.inicio)}</span> ` : ''}${esc(e.titulo)}</span>`)];
     const dots = [...it.pz.map(() => '<i class="prazo"></i>'), ...it.ev.map(e => `<i style="--c:${esc(member(e.responsavelId)?.cor || CORES[0])}"></i>`)].slice(0, 4).join('');
     cells += `<button class="cal-day ${d.getMonth() !== mo ? 'out' : ''} ${iso === t ? 'today' : ''} ${iso === ui.calDia ? 'sel' : ''} ${w === 0 || w === 6 ? 'wknd' : ''} ${hol ? 'hol' : ''}" data-act="cal-day" data-v="${iso}" aria-label="${esc(fmtDayLong(iso))}${it.ev.length + it.pz.length ? `, ${it.ev.length + it.pz.length} itens` : ''}" aria-pressed="${iso === ui.calDia}">
       <span class="n">${d.getDate()}</span>${hol ? `<span class="hol-name">${esc(hol)}</span>` : ''}
@@ -1000,7 +999,7 @@ function viewCalendario() {
     <section class="day-panel" aria-label="Programação do dia">
       <div class="day-head"><div><h3>${esc(fmtDayLong(ui.calDia))}</h3><small>${hol ? esc(hol) + ' · ' : ''}${sel.ev.length} ${sel.ev.length === 1 ? 'compromisso' : 'compromissos'}${sel.pz.length ? ` · ${sel.pz.length} ${sel.pz.length === 1 ? 'prazo' : 'prazos'}` : ''}</small></div>
         <button class="btn primary small" data-act="novo-evento" data-v="${ui.calDia}">${ICON.plus}Adicionar</button></div>
-      ${sel.pz.map(c => `<article class="ev prazo"><div class="t">FATAL</div><div style="min-width:0"><div class="ev-title">${esc(c.tipoPrazo || 'Prazo')} · ${esc(c.autor)} × ${esc(c.reu)}</div><div class="ev-meta"><span class="mono">${esc(c.numero || '')}</span>${whoChip(member(c.responsavelId))}</div><div class="ev-actions"><button class="btn small" data-act="open-case" data-id="${esc(c.id)}">Abrir caso</button></div></div></article>`).join('')}
+      ${sel.pz.map(c => prazoCard(c)).join('')}
       ${sel.ev.length ? sel.ev.map(e => evCard(e)).join('') : (sel.pz.length ? '' : `<div class="empty" style="padding:28px 12px"><p>Nada programado neste dia.</p></div>`)}
     </section>
   </div>`;
@@ -1022,12 +1021,21 @@ function viewEquipe() {
     <div class="member-stats"><div><b>${s.casos}</b><small>casos ativos</small></div><div><b class="${s.urg ? 'alert' : ''}">${s.urg}</b><small>urgentes</small></div><div><b>${s.agenda}</b><small>na agenda</small></div></div>
   </button>`; }).join('')}</div>` : `<div class="empty"><h3>Equipe vazia</h3><p>Adicione as pessoas do escritório para distribuir casos e compromissos.</p></div>`}`;
 }
+function prazoCard(c, showDate = false) {
+  const u = urg(c);
+  return `<article class="ev prazo"><div class="t">${showDate ? esc(dayRel(c.prazo)) : 'FATAL'}${showDate ? '<small>prazo fatal</small>' : ''}</div><div style="min-width:0">
+    <div class="ev-title">${esc(c.tipoPrazo || 'Prazo')} · ${esc(c.autor)} × ${esc(c.reu)}</div>
+    <div class="ev-meta"><span class="pill prazo-pill">${esc(u.label)}</span><span class="mono">${esc(c.numero || '')}</span>${whoChip(member(c.responsavelId))}</div>
+    <div class="ev-actions"><button class="btn small" data-act="open-case" data-id="${esc(c.id)}">Abrir caso</button></div></div></article>`;
+}
 function viewMembro(m) {
   const t = todayISO();
   const casos = sortCases(Store.data.casos.filter(c => c.responsavelId === m.id && c.status !== 'cumprido'));
   const feitos = Store.data.casos.filter(c => c.responsavelId === m.id && c.status === 'cumprido');
   const ag = Store.data.agenda.filter(e => e.responsavelId === m.id).sort((a, b) => (a.data + (a.inicio || '')).localeCompare(b.data + (b.inicio || '')));
   const prox = ag.filter(e => e.data >= t && eventStatus(e) !== 'finalizado');
+  const prazos = casos.filter(c => c.prazo);
+  const linha = [...prox.map(e => ({ k: e.data + (e.inicio || '00:00'), html: evCard(e, true) })), ...prazos.map(c => ({ k: c.prazo + '23:59', html: prazoCard(c, true) }))].sort((a, b) => a.k.localeCompare(b.k));
   const fin = ag.filter(e => eventStatus(e) === 'finalizado').reverse().slice(0, 10);
   const isMe = meMember()?.id === m.id;
   return `
@@ -1035,9 +1043,9 @@ function viewMembro(m) {
   <div class="profile-head">${avatar(m, 'lg')}<div style="min-width:0"><h2>${esc(m.nome)}</h2><div class="sub">${esc(m.cargo || 'Sem cargo')}${m.email ? ' · ' + esc(m.email) : ''}</div></div>
     <div class="profile-actions">${!isMe && meMember() ? `<button class="btn small" data-act="dm" data-id="${esc(m.id)}">${ICON.chat}Mensagem</button>` : ''}<button class="btn small" data-act="novo-evento" data-v="${t}" data-resp="${esc(m.id)}">${ICON.calendario}Marcar compromisso</button>${isAdmin() || isMe ? `<button class="btn small ghost" data-act="edit-membro" data-id="${esc(m.id)}">${ICON.edit}Editar</button>` : ''}${Store.mode === 'firebase' && !m.entrouEm && isAdmin() ? `<button class="btn small ghost" data-act="reenviar-convite" data-v="${esc(m.email)}">${ICON.copy}Mensagem do convite</button>` : ''}</div></div>
   <div class="section-h"><h3>Casos sob responsabilidade</h3><small>${casos.length} ativos · ${feitos.length} cumpridos</small></div>
-  <div class="case-list" role="list">${casos.length ? casos.map(caseRow).join('') : '<div class="empty" style="padding:24px"><p>Nenhum caso ativo.</p></div>'}</div>
-  <div class="section-h"><h3>Próximos compromissos</h3><small>${prox.length}</small></div>
-  <div class="ev-list">${prox.length ? prox.map(e => evCard(e, true)).join('') : '<p class="hint">Nada agendado.</p>'}</div>
+  <div class="case-list">${casos.length ? casos.map(caseRow).join('') : '<div class="empty" style="padding:24px"><p>Nenhum caso ativo.</p></div>'}</div>
+  <div class="section-h"><h3>Prazos e compromissos</h3><small>${prazos.length} ${prazos.length === 1 ? 'prazo' : 'prazos'} · ${prox.length} ${prox.length === 1 ? 'compromisso' : 'compromissos'}</small></div>
+  <div class="ev-list">${linha.length ? linha.map(x => x.html).join('') : '<p class="hint">Nada agendado.</p>'}</div>
   ${fin.length ? `<div class="section-h"><h3>Finalizados recentemente</h3><small>últimos ${fin.length}</small></div><div class="ev-list">${fin.map(e => evCard(e, true)).join('')}</div>` : ''}`;
 }
 
@@ -1075,15 +1083,33 @@ function viewChat() {
 }
 
 /* ---------------- MODAIS ---------------- */
-function openModal(html, onMount, cls = '') {
+let _focoAntes = null;
+function openModal(html, onMount, cls = '', travado = false) {
   const root = $('#modal-root');
-  root.innerHTML = `<div class="modal-wrap" data-act="modal-bg"><div class="modal ${cls}" role="dialog" aria-modal="true">${html}</div></div>`;
-  const first = root.querySelector('input:not([type=hidden]):not([type=radio]), select, textarea');
-  if (first && matchMedia('(min-width: 700px)').matches) setTimeout(() => first.focus(), 30);
+  if (!root.innerHTML) _focoAntes = document.activeElement;
+  root.innerHTML = `<div class="modal-wrap" ${travado ? 'data-travado="1"' : 'data-act="modal-bg"'}><div class="modal ${cls}" role="dialog" aria-modal="true" aria-labelledby="modal-titulo" tabindex="-1">${html}</div></div>`;
+  const modal = root.querySelector('.modal');
+  const first = root.querySelector('input:not([type=hidden]):not([type=radio]):not([type=checkbox]):not([readonly]), select, textarea');
+  setTimeout(() => { (first && matchMedia('(min-width: 700px)').matches ? first : modal).focus(); }, 30);
   onMount && onMount(root);
 }
-const closeModal = () => { $('#modal-root').innerHTML = ''; };
-const modalHead = t => `<div class="modal-head"><h2>${esc(t)}</h2><button type="button" class="icon-btn" data-act="close-modal" aria-label="Fechar">${ICON.x}</button></div>`;
+const closeModal = (force) => {
+  const root = $('#modal-root');
+  if (!force && root.querySelector('[data-travado]')) return;
+  root.innerHTML = '';
+  if (_focoAntes && document.contains(_focoAntes)) _focoAntes.focus(); _focoAntes = null;
+};
+const modalHead = (t, semFechar) => `<div class="modal-head"><h2 id="modal-titulo">${esc(t)}</h2>${semFechar ? '' : `<button type="button" class="icon-btn" data-act="close-modal" aria-label="Fechar">${ICON.x}</button>`}</div>`;
+/* Tab circula só dentro do modal ou da gaveta abertos */
+document.addEventListener('keydown', ev => {
+  if (ev.key !== 'Tab') return;
+  const box = $('#modal-root .modal') || $('.drawer'); if (!box) return;
+  const f = [...box.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')].filter(x => x.offsetParent !== null);
+  if (!f.length) return;
+  const a = f[0], z = f[f.length - 1];
+  if (ev.shiftKey && (document.activeElement === a || !box.contains(document.activeElement))) { ev.preventDefault(); z.focus(); }
+  else if (!ev.shiftKey && (document.activeElement === z || !box.contains(document.activeElement))) { ev.preventDefault(); a.focus(); }
+});
 
 function confirmModal(text, yesLabel, onYes) {
   openModal(`${modalHead('Confirmar')}<div class="modal-body"><p>${esc(text)}</p></div><div class="modal-foot"><button class="btn" data-act="close-modal">Cancelar</button><button class="btn danger" id="confirm-yes">${esc(yesLabel)}</button></div>`,
@@ -1132,7 +1158,7 @@ function caseModal(c) {
       </details>
       <label class="field"><span>Quem da equipe vai fazer</span><select name="responsavelId">${memberOptions(c.responsavelId)}</select></label>
       ${edit ? '' : `<div class="field"><label class="check"><input type="checkbox" name="lembrete" checked> Lembrete na agenda do responsável</label>
-        <select name="lembreteDias" class="input" style="max-width:260px"><option value="1">1 dia útil antes do prazo</option><option value="2" selected>2 dias úteis antes</option><option value="3">3 dias úteis antes</option><option value="5">5 dias úteis antes</option></select></div>`}
+        <select name="lembreteDias" class="input" aria-label="Quando avisar antes do prazo" style="max-width:260px"><option value="1">1 dia útil antes do prazo</option><option value="2" selected>2 dias úteis antes</option><option value="3">3 dias úteis antes</option><option value="5">5 dias úteis antes</option></select></div>`}
     </div>
     <div class="modal-foot"><button type="button" class="btn" data-act="close-modal">Cancelar</button><button type="submit" class="btn primary">${edit ? 'Salvar alterações' : 'Cadastrar caso'}</button></div>
   </form>`, root => {
@@ -1334,6 +1360,20 @@ document.addEventListener('click', async ev => {
   if (act === 'modal-bg' && ev.target !== el) return;
   switch (act) {
     case 'login-google': return loginGoogle();
+    case 'login-aba': loginAba = v; showLogin(); return $(`#tab-${v}`)?.focus();
+    case 'esqueci-senha': return esqueciModal();
+    case 'ja-confirmei': {
+      const u = fb.auth.currentUser; if (!u) return showLogin();
+      await u.reload(); if (!u.emailVerified) return showVerificar(u, 'Ainda não aparece como confirmado. Abra o link do e-mail e tente de novo.');
+      await u.getIdToken(true); return location.reload();
+    }
+    case 'reenviar-verificacao': { const u = fb.auth.currentUser; try { await fb.a.sendEmailVerification(u); showVerificar(u, 'Link reenviado.'); } catch (e) { showVerificar(u, erroAuth(e)); } return; }
+    case 'minha-conta': ui.menu = false; refresh(); return minhaContaModal();
+    case 'config-escritorio': ui.menu = false; refresh(); return escritorioModal();
+    case 'preferencias-privacidade': ui.menu = false; closeModal(true); refresh(); return window.PautaConsent?.banner({ forcar: true, app: true, privacidadeUrl: LINK_PRIVACIDADE });
+    case 'senha': closeModal(true); return senhaModal();
+    case 'exportar-meus-dados': return exportarMeusDados();
+    case 'sair-limpar': closeModal(true); return confirmModal('Sair e apagar deste aparelho a cópia offline, os documentos anexados aqui, a chave de IA e as preferências? O que está na nuvem do escritório continua lá.', 'Sair e apagar', async () => { await limparAparelho(); location.href = '../'; });
     case 'login-demo': return startDemo();
     case 'nav': ui.caso = null; if (v === 'equipe') ui.membroId = null; return go(v);
     case 'bell': ui.bell = !ui.bell; ui.menu = false; return refresh();
@@ -1441,7 +1481,7 @@ document.addEventListener('change', ev => {
 });
 document.addEventListener('keydown', ev => {
   if (ev.key === 'Escape') {
-    if ($('#modal-root').innerHTML) return closeModal();
+    if ($('#modal-root').innerHTML) return closeModal();  // modais travados ignoram
     if (ui.bell || ui.menu) { ui.bell = ui.menu = false; return refresh(); }
     if (ui.caso) { ui.caso = null; return refresh(); }
   }
@@ -1463,6 +1503,63 @@ document.addEventListener('submit', async ev => {
   const fd = Object.fromEntries(new FormData(f).entries());
   const quem = meMember()?.nome || me?.nome || '';
   switch (f.id) {
+    case 'f-login': {
+      const email = (fd.email || '').trim(), senha = fd.senha || '';
+      if (!email || !senha) return showLogin('Informe e-mail e senha.');
+      return entrarComEmail(email, senha);
+    }
+    case 'f-cadastro': {
+      const nome = (fd.nome || '').trim(), email = (fd.email || '').trim().toLowerCase(), senha = fd.senha || '';
+      const erro = !nome ? 'Informe seu nome.' : !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) ? 'Informe um e-mail válido.' : senhaFraca(senha, email) || (senha !== fd.senha2 ? 'As senhas não são iguais.' : '') || (!fd.aceite ? 'Para criar a conta, aceite os Termos de Uso.' : '');
+      if (erro) { showLogin(erro); $('#cad-nome').value = nome; $('#cad-email').value = email; return; }
+      return criarConta({ nome, email, senha });
+    }
+    case 'f-esqueci': {
+      const email = (fd.email || '').trim(); const out = f.querySelector('#esq-msg');
+      if (!email) { out.textContent = 'Informe o e-mail.'; return; }
+      try { await fb.a.sendPasswordResetEmail(fb.auth, email); } catch (e) { if (e.code === 'auth/too-many-requests' || e.code === 'auth/network-request-failed') { out.textContent = erroAuth(e); return; } }
+      out.textContent = 'Se houver uma conta com esse e-mail, enviamos um link para criar uma nova senha. Confira também o spam.'; return;
+    }
+    case 'f-novidades': {
+      if (!fd.aceite) return toast('Para continuar, aceite os Termos de Uso.', 'danger');
+      const m = meMember(); if (m) await safe(Store.update('equipe', m.id, { aceite: { versao: TERMOS_V, em: Date.now(), via: 'aviso' } }));
+      closeModal(true); if (fd.criarSenha) senhaModal(); return;
+    }
+    case 'f-senha': {
+      const out = f.querySelector('#senha-erro'); const u = fb.auth.currentUser;
+      const erro = senhaFraca(fd.nova || '', u.email) || (fd.nova !== fd.nova2 ? 'As senhas não são iguais.' : '');
+      if (erro) { out.textContent = erro; return; }
+      try {
+        const criando = !temSenha();
+        if (!criando) { await reautenticar(fd.atual || ''); await fb.a.updatePassword(u, fd.nova); }
+        else {
+          const cred = fb.a.EmailAuthProvider.credential(u.email, fd.nova);
+          try { await fb.a.linkWithCredential(u, cred); }
+          catch (e) { if (e.code !== 'auth/requires-recent-login') throw e; await reautenticar(null); await fb.a.linkWithCredential(u, cred); }
+        }
+        closeModal(true); toast(criando ? 'Senha criada. Agora você também entra com e-mail e senha.' : 'Senha trocada.');
+      } catch (e) { out.textContent = erroAuth(e); }
+      return;
+    }
+    case 'f-meu-nome': {
+      const nome = (fd.nome || '').trim(); const m = meMember(); if (!nome || !m) return;
+      await safe(Store.update('equipe', m.id, { nome }), 'Nome atualizado');
+      try { await fb.a.updateProfile(fb.auth.currentUser, { displayName: nome }); } catch { /* ok */ }
+      return;
+    }
+    case 'f-escritorio': {
+      closeModal(true);
+      try { await fb.f.updateDoc(fb.f.doc(fb.db, 'escritorios', Store.eid), { nome: (fd.nome || '').trim(), advogadosResumo: (fd.adv || '').trim() }); toast('Dados do escritório salvos'); }
+      catch (e) { toast('Não foi possível salvar: ' + e.message, 'danger'); }
+      return;
+    }
+    case 'f-excluir': {
+      const out = f.querySelector('#exc-erro');
+      if ((fd.conf || '').trim().toUpperCase() !== 'EXCLUIR') { out.textContent = 'Digite EXCLUIR para confirmar.'; return; }
+      if (temSenha() && !fd.senha) { out.textContent = 'Informe sua senha.'; return; }
+      try { await excluirConta(fd.senha); location.href = '../'; } catch (e) { out.textContent = erroAuth(e); }
+      return;
+    }
     case 'f-criar-esc': {
       const nome = (fd.nome || '').trim(); if (!nome) return;
       f.querySelector('button[type=submit]').disabled = true;
@@ -1543,25 +1640,231 @@ document.addEventListener('submit', async ev => {
     case 'f-chat': {
       const inp = f.querySelector('#chat-input'); const txt = inp.value.trim(); const m = meMember(); if (!txt || !m) return;
       inp.value = ''; inp.style.height = 'auto';
-      return safe(Store.add('mensagens', { canal: ui.canal, autorId: m.id, autorNome: m.nome, texto: txt }));
+      if (txt.length > 4000) return toast('Mensagem longa demais (máximo de 4.000 caracteres)', 'danger');
+      return safe(Store.add('mensagens', { canal: ui.canal, autorId: m.id, autorNome: m.nome, autorEmail: meuEmail(), texto: txt }));
     }
   }
 });
 
+
+/* ---------------- CONTA, SENHA, TERMOS E DIREITOS DO TITULAR ---------------- */
+const temSenha = () => (fb?.auth.currentUser?.providerData || []).some(x => x.providerId === 'password');
+const temGoogle = () => (fb?.auth.currentUser?.providerData || []).some(x => x.providerId === 'google.com');
+async function reautenticar(senhaAtual) {
+  const u = fb.auth.currentUser;
+  if (senhaAtual) return fb.a.reauthenticateWithCredential(u, fb.a.EmailAuthProvider.credential(u.email, senhaAtual));
+  const prov = new fb.a.GoogleAuthProvider(); prov.setCustomParameters({ login_hint: u.email });
+  return fb.a.reauthenticateWithPopup(u, prov);
+}
+function novidadesModal() {
+  const m = meMember(); const antigo = m && m.entrouEm && (Date.now() - m.entrouEm > 10 * 60e3);
+  openModal(`<form id="f-novidades">
+    ${modalHead(antigo ? 'Novidades na Pauta' : 'Antes de começar', true)}
+    <div class="modal-body">
+      ${antigo ? `<ul class="novidades">
+        <li><b>Entrar com e-mail e senha.</b> Além do Google, agora dá para entrar com e-mail e senha.${temSenha() ? '' : ' Você pode criar uma senha para a sua conta logo abaixo.'}</li>
+        <li><b>Termos de Uso e Política de Privacidade.</b> Explicam quais dados a Pauta usa, para quê e quais são os seus direitos.</li>
+        <li><b>Menos dados guardados.</b> A foto do perfil Google não é mais salva; a equipe vê suas iniciais.</li>
+        <li><b>Prazos mais claros.</b> O carimbo mostra quantos dias faltam, e os prazos aparecem na Agenda com o tipo de prazo.</li>
+        <li><b>Sua conta.</b> Em "Minha conta e privacidade" você baixa seus dados, troca a senha ou exclui a conta.</li>
+      </ul>` : '<p>Para usar a Pauta, leia e aceite os documentos abaixo.</p>'}
+      <label class="check aceite"><input type="checkbox" name="aceite" required> <span>Li e aceito os <a href="${LINK_TERMOS}" target="_blank" rel="noopener">Termos de Uso</a> e estou ciente da <a href="${LINK_PRIVACIDADE}" target="_blank" rel="noopener">Política de Privacidade</a>.</span></label>
+      ${temSenha() ? '' : '<label class="check"><input type="checkbox" name="criarSenha"> <span>Quero criar uma senha para entrar também com e-mail.</span></label>'}
+    </div>
+    <div class="modal-foot"><button type="button" class="btn ghost" data-act="logout" style="margin-right:auto">Sair</button><button type="submit" class="btn primary">Continuar</button></div>
+  </form>`, null, 'sm', true);
+}
+function senhaModal() {
+  const criar = !temSenha();
+  openModal(`<form id="f-senha" novalidate>
+    ${modalHead(criar ? 'Criar senha' : 'Trocar senha')}
+    <div class="modal-body">
+      ${criar ? `<p>Você vai poder entrar com <b>${esc(fb.auth.currentUser.email)}</b> e esta senha, além do Google.</p>` : `<div class="field"><label for="senha-atual">Senha atual</label><input id="senha-atual" name="atual" type="password" autocomplete="current-password" required maxlength="128"></div>`}
+      <div class="field"><label for="senha-nova">${criar ? 'Senha' : 'Nova senha'}</label><input id="senha-nova" name="nova" type="password" autocomplete="new-password" required minlength="8" maxlength="128" aria-describedby="senha-regra"><span class="hint" id="senha-regra">Mínimo de 8 caracteres, com letras e números.</span></div>
+      <div class="field"><label for="senha-nova2">Repita a senha</label><input id="senha-nova2" name="nova2" type="password" autocomplete="new-password" required maxlength="128"></div>
+      <p class="hint bad" id="senha-erro" role="alert"></p>
+    </div>
+    <div class="modal-foot"><button type="button" class="btn" data-act="close-modal">Cancelar</button><button type="submit" class="btn primary">${criar ? 'Criar senha' : 'Trocar senha'}</button></div>
+  </form>`, null, 'sm');
+}
+function esqueciModal() {
+  openModal(`<form id="f-esqueci" novalidate>
+    ${modalHead('Redefinir senha')}
+    <div class="modal-body">
+      <div class="field"><label for="esq-email">E-mail da conta</label><input id="esq-email" name="email" type="email" required autocomplete="email" maxlength="120" value="${esc($('#login-email')?.value || '')}"></div>
+      <p class="hint" id="esq-msg" role="status"></p>
+    </div>
+    <div class="modal-foot"><button type="button" class="btn" data-act="close-modal">Fechar</button><button type="submit" class="btn primary">Enviar link</button></div>
+  </form>`, null, 'sm');
+}
+function minhaContaModal() {
+  const u = fb.auth.currentUser, m = meMember() || {};
+  const formas = [temGoogle() && 'Google', temSenha() && 'e-mail e senha'].filter(Boolean).join('; ') || '—';
+  const contato = (CFG.contatoPrivacidade || '').trim();
+  openModal(`<div>
+    ${modalHead('Minha conta e privacidade')}
+    <div class="modal-body">
+      <form id="f-meu-nome" class="field"><label for="meu-nome">Nome exibido para a equipe</label><div style="display:flex;gap:8px"><input id="meu-nome" name="nome" required maxlength="80" value="${esc(m.nome || '')}"><button class="btn small" type="submit">Salvar</button></div></form>
+      <dl class="kv">
+        <dt>E-mail</dt><dd>${esc(u.email)}</dd>
+        <dt>Formas de entrar</dt><dd>${esc(formas)}</dd>
+        <dt>Escritório</dt><dd>${esc(officeName())}${isAdmin() ? ' (administrador)' : ''}</dd>
+        <dt>Termos aceitos</dt><dd>${m.aceite?.em ? esc(new Date(m.aceite.em).toLocaleString('pt-BR')) + ' · versão ' + esc(m.aceite.versao) : 'ainda não'}</dd>
+      </dl>
+      <div class="acoes-conta">
+        <button class="btn small" data-act="senha">${ICON.key}${temSenha() ? 'Trocar senha' : 'Criar senha'}</button>
+        <button class="btn small" data-act="exportar-meus-dados">${ICON.down}Baixar meus dados</button>
+        <button class="btn small" data-act="preferencias-privacidade">${ICON.info}Preferências de armazenamento</button>
+        <button class="btn small" data-act="sair-limpar">${ICON.out}Sair e apagar dados deste aparelho</button>
+      </div>
+      <p class="hint">Os processos, prazos e documentos do escritório pertencem ao escritório. Pedidos sobre eles vão para o administrador do escritório${contato ? `; sobre a sua conta na Pauta, escreva para <b>${esc(contato)}</b>` : ''}. Veja a <a href="${LINK_PRIVACIDADE}" target="_blank" rel="noopener">Política de Privacidade</a>.</p>
+      <details class="calc perigo"><summary>Excluir minha conta</summary><div class="calc-body">
+        ${Store.esc?.donoEmail === meuEmail() ? `<p>Você criou este escritório e não pode excluir a conta por aqui, porque o escritório ficaria sem responsável.${contato ? ` Escreva para ${esc(contato)}.` : ''}</p>` : `
+        <p>Remove você do escritório, apaga seu perfil na equipe e a sua conta de acesso. Os processos, prazos e mensagens do escritório continuam com o escritório.</p>
+        <form id="f-excluir" class="field">
+          ${temSenha() ? '<label for="exc-senha">Sua senha</label><input id="exc-senha" name="senha" type="password" autocomplete="current-password" maxlength="128">' : '<p class="hint">Vamos pedir para você entrar com o Google de novo para confirmar.</p>'}
+          <label for="exc-conf">Digite EXCLUIR para confirmar</label><input id="exc-conf" name="conf" autocomplete="off" maxlength="10">
+          <button class="btn danger" type="submit">Excluir minha conta</button>
+          <p class="hint bad" id="exc-erro" role="alert"></p>
+        </form>`}
+      </div></details>
+    </div>
+  </div>`, null, '');
+}
+function escritorioModal() {
+  const e = Store.esc || {};
+  openModal(`<form id="f-escritorio">
+    ${modalHead('Dados do escritório')}
+    <div class="modal-body">
+      <div class="field"><label for="esc-nome2">Nome do escritório</label><input id="esc-nome2" name="nome" required maxlength="120" value="${esc(e.nome || '')}"></div>
+      <div class="field"><label for="esc-adv">Advogados do escritório (usado no resumo por IA)</label><input id="esc-adv" name="adv" maxlength="300" value="${esc(e.advogadosResumo || '')}" placeholder="Ex.: Dra. Fulana de Tal (OAB/SP 000.000)"><span class="hint">A IA usa esses nomes para identificar quem é o cliente do escritório no processo.</span></div>
+    </div>
+    <div class="modal-foot"><button type="button" class="btn" data-act="close-modal">Cancelar</button><button type="submit" class="btn primary">Salvar</button></div>
+  </form>`, null, 'sm');
+}
+function baixar(nome, texto, tipo) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([texto], { type: tipo })); a.download = nome;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+function exportarMeusDados() {
+  const u = fb.auth.currentUser, m = meMember();
+  const dados = {
+    geradoEm: new Date().toISOString(),
+    conta: { email: u.email, nome: u.displayName || '', emailVerificado: u.emailVerified, formasDeEntrar: u.providerData.map(x => x.providerId), criadaEm: u.metadata.creationTime, ultimoAcesso: u.metadata.lastSignInTime },
+    escritorio: { nome: officeName(), administrador: isAdmin() },
+    perfilNaEquipe: m || null,
+    mensagensEnviadas: Store.data.mensagens.filter(x => x.autorEmail === meuEmail() || (m && x.autorId === m.id)).map(x => ({ canal: x.canal, texto: x.texto, criadoEm: new Date(x.criadoEm).toISOString() })),
+    armazenamentoNesteAparelho: { escolhaDePrivacidade: window.PautaConsent?.ler() || null, chaveDeIAConfigurada: !!iaCfg().key },
+  };
+  baixar(`pauta-meus-dados-${todayISO()}.json`, JSON.stringify(dados, null, 2), 'application/json');
+  toast('Arquivo com seus dados baixado');
+}
+async function limparAparelho() {
+  try { await fb?.a.signOut(fb.auth); } catch { /* ok */ }
+  try { await fb?.f.terminate(fb.db); await fb?.f.clearIndexedDbPersistence(fb.db); } catch { /* ok */ }
+  try { indexedDB.deleteDatabase('pauta-arquivos'); } catch { /* ok */ }
+  try { Object.keys(localStorage).forEach(k => { if (k.startsWith('pauta-') && k !== 'pauta-consent') localStorage.removeItem(k); }); sessionStorage.clear(); } catch { /* ok */ }
+}
+async function excluirConta(senha) {
+  const m = meMember(); const { f, db } = fb; const email = meuEmail();
+  await reautenticar(senha || null);
+  if (m) await Store.remove('equipe', m.id);
+  try { await f.deleteDoc(f.doc(db, 'convites', email)); } catch { /* ok */ }
+  await f.updateDoc(f.doc(db, 'escritorios', Store.eid), { membros: f.arrayRemove(email), admins: f.arrayRemove(email) });
+  await fb.a.deleteUser(fb.auth.currentUser);
+  await limparAparelho();
+}
+
 /* ---------------- login e inicialização ---------------- */
-function loginHTML(msg) {
+let loginAba = 'entrar';
+function loginHTML(msg, ok) {
   const hasFb = !!(CFG.firebase && CFG.firebase.apiKey);
-  return `<div class="login"><div class="login-card">
-    <div class="login-brand"><span class="brand-mark big">§</span><div><div class="login-title">Pauta</div><div class="login-office">${esc(OFFICE)}</div></div></div>
-    <p class="login-lede">Prazos, agenda, equipe e conversa do escritório num lugar só.</p>
-    ${msg ? `<p class="login-msg">${esc(msg)}</p>` : ''}
-    ${hasFb ? `<button class="btn google" data-act="login-google">${ICON.google}Entrar com Google</button>
-    <p class="hint">Primeira vez do escritório? Entre e crie a equipe. Foi convidado? Entre com o mesmo e-mail do convite.</p>
-    ${CFG.allowDemo ? '<button class="btn ghost" data-act="login-demo">Abrir modo demonstração</button>' : ''}` : `
-    <form id="f-start" class="field"><span>Seu nome</span><input id="start-nome" name="nome" required autocomplete="name" placeholder="Como a equipe te chama"><button class="btn primary" type="submit" style="margin-top:6px">Começar</button></form>
-    <p class="hint">Por enquanto os dados ficam salvos neste navegador. O login com Google e o uso pela equipe toda ligam quando o <span class="mono">config.js</span> recebe os dados do Firebase (passo a passo no README).</p>`}
-    ${hasFb ? '<p class="login-foot">Só quem foi convidado para o escritório vê os processos. Os dados ficam protegidos pelas regras do banco.</p>' : ''}
-  </div></div>`;
+  if (!hasFb) return `<div class="login"><main class="login-card" id="conteudo">
+    <div class="login-brand"><span class="brand-mark big" aria-hidden="true">§</span><div><h1 class="login-title">Pauta</h1><div class="login-office">${esc(OFFICE)}</div></div></div>
+    <form id="f-start" class="field"><label for="start-nome">Seu nome</label><input id="start-nome" name="nome" required autocomplete="name" placeholder="Como a equipe te chama"><button class="btn primary" type="submit" style="margin-top:6px">Começar</button></form>
+    <p class="hint">Os dados ficam salvos só neste navegador.</p></main></div>`;
+  const bloq = bloqueioRestante();
+  const cad = loginAba === 'criar';
+  return `<div class="login"><main class="login-card" id="conteudo">
+    <div class="login-brand"><span class="brand-mark big" aria-hidden="true">§</span><div><h1 class="login-title">Pauta</h1><div class="login-office">Prazos e agenda do escritório</div></div></div>
+    ${msg ? `<p class="${ok ? 'login-ok' : 'login-msg'}" role="${ok ? 'status' : 'alert'}">${esc(msg)}</p>` : ''}
+    <div class="seg login-tabs" role="tablist" aria-label="Entrar ou criar conta">
+      <button type="button" role="tab" id="tab-entrar" aria-selected="${!cad}" aria-controls="painel-login" class="${cad ? '' : 'on'}" data-act="login-aba" data-v="entrar">Entrar</button>
+      <button type="button" role="tab" id="tab-criar" aria-selected="${cad}" aria-controls="painel-login" class="${cad ? 'on' : ''}" data-act="login-aba" data-v="criar">Criar conta</button>
+    </div>
+    <div id="painel-login" role="tabpanel" aria-labelledby="${cad ? 'tab-criar' : 'tab-entrar'}" class="login-panel">
+      <button class="btn google" type="button" data-act="login-google">${ICON.google}${cad ? 'Criar conta com Google' : 'Entrar com Google'}</button>
+      <div class="login-ou" aria-hidden="true"><span>ou com e-mail</span></div>
+      ${cad ? `<form id="f-cadastro" class="login-form" novalidate>
+        <div class="field"><label for="cad-nome">Seu nome</label><input id="cad-nome" name="nome" required autocomplete="name" maxlength="80"></div>
+        <div class="field"><label for="cad-email">E-mail</label><input id="cad-email" name="email" type="email" required autocomplete="email" maxlength="120"></div>
+        <div class="field"><label for="cad-senha">Senha</label><input id="cad-senha" name="senha" type="password" required autocomplete="new-password" minlength="8" maxlength="128" aria-describedby="cad-senha-regra"><span class="hint" id="cad-senha-regra">Mínimo de 8 caracteres, com letras e números.</span></div>
+        <div class="field"><label for="cad-senha2">Repita a senha</label><input id="cad-senha2" name="senha2" type="password" required autocomplete="new-password" maxlength="128"></div>
+        <label class="check aceite"><input type="checkbox" name="aceite" required> <span>Li e aceito os <a href="${LINK_TERMOS}" target="_blank" rel="noopener">Termos de Uso</a> e estou ciente da <a href="${LINK_PRIVACIDADE}" target="_blank" rel="noopener">Política de Privacidade</a>.</span></label>
+        <button class="btn primary" type="submit">Criar conta</button>
+        <p class="hint">Vamos enviar um link para confirmar o e-mail antes do primeiro acesso.</p>
+      </form>` : `<form id="f-login" class="login-form" novalidate>
+        <div class="field"><label for="login-email">E-mail</label><input id="login-email" name="email" type="email" required autocomplete="username" maxlength="120"></div>
+        <div class="field"><label for="login-senha">Senha</label><input id="login-senha" name="senha" type="password" required autocomplete="current-password" maxlength="128"></div>
+        <button class="btn primary" type="submit" ${bloq ? 'disabled' : ''}>Entrar</button>
+        ${bloq ? `<p class="hint bad" role="status">Muitas tentativas sem sucesso. Tente de novo em ${Math.ceil(bloq / 1000)} segundos ou redefina a senha.</p>` : ''}
+        <button class="linkish" type="button" data-act="esqueci-senha">Esqueci minha senha</button>
+      </form>`}
+    </div>
+    <p class="login-foot">Primeira vez do escritório? Crie a conta e depois o escritório. Foi convidado? Use o mesmo e-mail do convite.<br><a href="${LINK_TERMOS}">Termos de Uso</a> · <a href="${LINK_PRIVACIDADE}">Política de Privacidade</a></p>
+  </main></div>`;
+}
+/* Limite de tentativas no aparelho (o Firebase também bloqueia do lado do servidor) */
+const TENT_KEY = 'pauta-tentativas';
+function bloqueioRestante() { const t = ls.get(TENT_KEY, { n: 0, ate: 0 }); return Math.max(0, (t.ate || 0) - Date.now()); }
+function registrarFalha() {
+  const t = ls.get(TENT_KEY, { n: 0, ate: 0 }); t.n = (t.n || 0) + 1;
+  if (t.n >= 5) t.ate = Date.now() + Math.min(15 * 60e3, 30e3 * 2 ** (t.n - 5));
+  ls.set(TENT_KEY, t);
+}
+const zerarFalhas = () => ls.del(TENT_KEY);
+function senhaFraca(s, email) {
+  if (s.length < 8) return 'A senha precisa ter pelo menos 8 caracteres.';
+  if (!/[a-zA-ZÀ-ÿ]/.test(s) || !/\d/.test(s)) return 'Use letras e números na senha.';
+  if (email && s.toLowerCase().includes(email.split('@')[0].toLowerCase()) && email.split('@')[0].length >= 4) return 'A senha não pode conter o seu e-mail.';
+  return '';
+}
+function erroAuth(e) {
+  const c = e?.code || '';
+  if (['auth/invalid-credential', 'auth/wrong-password', 'auth/user-not-found', 'auth/invalid-login-credentials', 'auth/invalid-email'].includes(c)) return 'E-mail ou senha incorretos.';
+  if (c === 'auth/too-many-requests') return 'Muitas tentativas. Aguarde alguns minutos ou redefina a senha.';
+  if (c === 'auth/email-already-in-use') return 'Não foi possível criar a conta com esse e-mail. Se você já entra com o Google, use "Entrar com Google" e crie uma senha em Minha conta.';
+  if (c === 'auth/weak-password' || c === 'auth/password-does-not-meet-requirements') return 'Senha fraca: use pelo menos 8 caracteres, com letras e números.';
+  if (c === 'auth/network-request-failed') return 'Sem conexão. Confira a internet.';
+  if (c === 'auth/popup-blocked') return 'O navegador bloqueou a janela do Google. Permita pop-ups para este site.';
+  if (c === 'auth/requires-recent-login') return 'Por segurança, entre de novo antes de fazer isso.';
+  if (c === 'auth/credential-already-in-use' || c === 'auth/provider-already-linked') return 'Essa conta já tem senha cadastrada.';
+  return 'Não foi possível concluir: ' + (e?.message || e);
+}
+async function entrarComEmail(email, senha) {
+  if (bloqueioRestante()) return showLogin();
+  try { await fb.a.signInWithEmailAndPassword(fb.auth, email, senha); zerarFalhas(); }
+  catch (e) { registrarFalha(); showLogin(erroAuth(e)); setTimeout(() => { if ($('#app').dataset.mode === 'login' && !bloqueioRestante()) showLogin(); }, bloqueioRestante() + 500); }
+}
+async function criarConta({ nome, email, senha }) {
+  try {
+    sessionStorage.setItem('pauta-aceite', TERMOS_V);
+    const cred = await fb.a.createUserWithEmailAndPassword(fb.auth, email, senha);
+    await fb.a.updateProfile(cred.user, { displayName: nome });
+    await fb.a.sendEmailVerification(cred.user);
+    showVerificar(cred.user, 'Conta criada. Enviamos um link de confirmação para o seu e-mail.');
+  } catch (e) { try { sessionStorage.removeItem('pauta-aceite'); } catch { /* ok */ } showLogin(erroAuth(e)); }
+}
+function showVerificar(user, msg) {
+  const app = $('#app'); app.dataset.mode = 'login';
+  app.innerHTML = `<div class="login"><main class="login-card" id="conteudo">
+    <div class="login-brand"><span class="brand-mark big" aria-hidden="true">§</span><div><h1 class="login-title">Confirme seu e-mail</h1><div class="login-office">${esc(user.email)}</div></div></div>
+    ${msg ? `<p class="login-ok" role="status">${esc(msg)}</p>` : ''}
+    <p class="login-lede">Abra o link que enviamos para <b>${esc(user.email)}</b> e depois clique em "Já confirmei". Confira também a caixa de spam.</p>
+    <button class="btn primary" type="button" data-act="ja-confirmei">Já confirmei</button>
+    <button class="btn" type="button" data-act="reenviar-verificacao">Reenviar o link</button>
+    <button class="linkish" type="button" data-act="logout">Usar outra conta</button>
+  </main></div>`;
 }
 function showCriarEscritorio(msg) {
   const app = $('#app'); app.dataset.mode = 'onboard';
@@ -1569,7 +1872,7 @@ function showCriarEscritorio(msg) {
     <div class="login-brand"><span class="brand-mark big">§</span><div><div class="login-title">Pauta</div><div class="login-office">${esc(meuEmail())}</div></div></div>
     ${msg ? `<p class="login-msg">${esc(msg)}</p>` : ''}
     <p class="login-lede">Este e-mail ainda não faz parte de nenhum escritório.</p>
-    <form id="f-criar-esc" class="field"><span>Nome do escritório</span><input id="esc-nome" name="nome" required value="${esc(OFFICE)}"><button class="btn primary" type="submit" style="margin-top:6px">Criar escritório e entrar</button></form>
+    <form id="f-criar-esc" class="field"><label for="esc-nome">Nome do escritório</label><input id="esc-nome" name="nome" required maxlength="120" placeholder="Ex.: Silva & Souza Advocacia"><button class="btn primary" type="submit" style="margin-top:6px">Criar escritório e entrar</button></form>
     <p class="hint">Você vira administrador e convida a equipe pela aba Equipe.</p>
     <p class="login-foot">Foi convidado por alguém? Então não crie: peça para a pessoa conferir se convidou exatamente <b>${esc(meuEmail())}</b>, depois <button class="linkish" data-act="recarregar">tente de novo</button> ou <button class="linkish" data-act="logout">entre com outra conta</button>.</p>
   </div></div>`;
@@ -1579,7 +1882,9 @@ async function entrarEscritorio(eid) {
   showCarregando('Carregando o escritório…');
   await Store.initFirebase(fb, eid);
   try { await ensureMember(); } catch (e) { toast('Não consegui criar seu perfil na equipe: ' + e.message, 'danger'); }
+  try { sessionStorage.removeItem('pauta-aceite'); } catch { /* ok */ }
   showApp();
+  if (meMember() && meMember().aceite?.versao !== TERMOS_V) novidadesModal();
 }
 function showLogin(msg) { const app = $('#app'); app.dataset.mode = 'login'; app.innerHTML = loginHTML(msg); }
 function showApp() {
@@ -1612,7 +1917,7 @@ async function restoreBackup(file) {
   });
 }
 async function loadFirebase(cfg) {
-  const base = `https://www.gstatic.com/firebasejs/${FIREBASE_V}/`;
+  const base = new URL(`../assets/vendor/firebase-${FIREBASE_V}/`, location.href).href;
   const [appM, a, f] = await Promise.all([import(base + 'firebase-app.js'), import(base + 'firebase-auth.js'), import(base + 'firebase-firestore.js')]);
   const app = appM.initializeApp(cfg);
   let db;
@@ -1637,31 +1942,35 @@ async function logout() {
 async function ensureMember() {
   const m = meMember();
   if (m) {
-    const patch = {}; if (!m.entrouEm) patch.entrouEm = Date.now(); if (me.foto && m.foto !== me.foto) patch.foto = me.foto;
+    const patch = {}; if (!m.entrouEm) patch.entrouEm = Date.now(); if (m.foto) patch.foto = null; // não guardamos foto de perfil
+    const aceitePend = sessionStorage.getItem('pauta-aceite'); if (aceitePend && m.aceite?.versao !== TERMOS_V) patch.aceite = { versao: TERMOS_V, em: Date.now(), via: 'cadastro' };
     if (!m.nome || m.nome === meuEmail().split('@')[0]) patch.nome = me.nome;
     if (Object.keys(patch).length) await Store.update('equipe', m.id, patch);
     return;
   }
   const others = Store.data.equipe.length;
-  await Store.add('equipe', { nome: me.nome || meuEmail().split('@')[0], email: meuEmail(), cargo: others ? '' : 'Administração', cor: CORES[others % CORES.length], foto: me.foto || '', entrouEm: Date.now() });
+  const aceite = sessionStorage.getItem('pauta-aceite') ? { versao: TERMOS_V, em: Date.now(), via: 'cadastro' } : null;
+  await Store.add('equipe', { nome: me.nome || meuEmail().split('@')[0], email: meuEmail(), cargo: others ? '' : 'Administração', cor: CORES[others % CORES.length], entrouEm: Date.now(), aceite });
 }
 
 async function boot() {
   const tema = ls.get('pauta-tema', null); if (tema) document.documentElement.dataset.theme = tema;
+  if (!IS_ARTIFACT) window.PautaConsent?.banner({ app: true, privacidadeUrl: LINK_PRIVACIDADE });
   Store.on(() => { if ($('#app').dataset.mode === 'app') refresh(); });
   setInterval(() => { if ($('#app').dataset.mode === 'app' && !ui.bell && !ui.menu) refresh(); }, 60000); // atualiza "finalizado" e contagens
   const hasFb = !!(CFG.firebase && CFG.firebase.apiKey);
   if (IS_ARTIFACT) return startDemo();
   if (!hasFb) return startLocal();
+  if (location.hash === '#criar') { loginAba = 'criar'; try { history.replaceState(null, '', location.pathname); } catch { /* ok */ } }
   showLogin();
-  try { fb = await loadFirebase(CFG.firebase); }
+  try { fb = await loadFirebase(CFG.firebase); fb.auth.languageCode = 'pt-BR'; }
   catch (e) { return showLogin('Não consegui carregar o Firebase. Confira a internet e o config.js. (' + e.message + ')'); }
   fb.a.getRedirectResult(fb.auth).catch(() => {});
   fb.a.onAuthStateChanged(fb.auth, async user => {
-    if (!user) return showLogin();
-    if (!isAllowed(user.email)) { await fb.a.signOut(fb.auth); return showLogin(`O e-mail ${user.email} não tem acesso a esta Pauta.`); }
-    me = { email: user.email, nome: user.displayName || user.email, foto: user.photoURL || '' };
+    if (!user) { me = null; return showLogin(); }
+    me = { email: user.email, nome: user.displayName || (user.email || '').split('@')[0], provedores: user.providerData.map(x => x.providerId) };
     if (Store.mode === 'firebase') return; // já carregado
+    if (!user.emailVerified) return showVerificar(user);
     showCarregando('Procurando seu escritório…');
     let eid;
     try { eid = await acharEscritorio(); } catch (e) { return showLogin('Não consegui falar com o banco de dados: ' + e.message); }

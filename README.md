@@ -1,123 +1,73 @@
-# Pauta — Advocacia Coradelli
+# Pauta
 
-Sistema interno de **prazos, agenda, equipe e chat** do escritório. Site estático (HTML/CSS/JS, sem build) hospedado no **GitHub Pages**, com **login Google** e banco em tempo real pelo **Firebase** (plano gratuito Spark atende um escritório pequeno).
+Ferramenta de prazos processuais, agenda, equipe e conversa para escritórios de advocacia. Site estático (HTML, CSS e JS, sem etapa de build) com login e banco de dados no Firebase.
 
-Sem o Firebase configurado, ele abre em **modo local**: começa zerado, pede seu nome e salva tudo **só no navegador daquele aparelho** (use *Baixar backup* / *Restaurar backup* no menu da conta). Para a equipe usar junto, com login Google, siga "Colocando no ar". Depois de ligar o Firebase, os casos do modo local podem ser trazidos por *Importar casos (JSON)*.
+> **Status:** fase de testes, ainda não divulgada ao público. Os campos marcados como **[PREENCHER]** em `privacidade.html`, `termos.html` e `app/config.js` precisam ser completados antes do lançamento.
 
-## Arquivos
+## Estrutura
 
-| Arquivo | Para quê |
+| Caminho | O que é |
 |---|---|
-| `index.html` | Página única do app |
-| `styles.css` | Visual (tema claro/escuro automático) |
-| `app.js` | Toda a lógica |
-| `config.js` | **Você edita:** dados do Firebase e e-mails liberados |
-| `firestore.rules` | **Você edita:** regra de segurança do banco (cole no Firebase) |
-| `exemplo-importacao.json` | Formato para importar casos em lote / pela IA |
+| `index.html` | Página inicial pública (produto). Quem já usa o app neste aparelho é levado direto para `app/`. `?site` força a exibição da página. |
+| `privacidade.html` | Política de Privacidade (LGPD) |
+| `termos.html` | Termos de Uso |
+| `app/` | O sistema: `index.html`, `app.js`, `styles.css`, `config.js` |
+| `assets/consent.js` | Aviso de privacidade e escolha de armazenamento (essencial × preferências) |
+| `assets/site.css` | Estilo das páginas públicas |
+| `assets/fonts/` | Fontes servidas pelo próprio site (nada vem do Google Fonts) |
+| `assets/vendor/` | Firebase SDK e PDF.js servidos pelo próprio site |
+| `firestore.rules` | Regras de segurança do banco (o equivalente ao RLS) |
+| `LICENCAS.md` | Licenças de terceiros |
+| `exemplo-importacao.json` | Formato para importar casos em lote |
 
-## Escritório, login e convites (como está configurado)
+## Configuração atual (Firebase `pauta-coradelli`)
 
-- Projeto Firebase: **pauta-coradelli** (conta murilodannis123@gmail.com). Login Google ativado, domínio `murilodannis123-lang.github.io` autorizado e regras de `firestore.rules` publicadas.
-- **Primeiro acesso**: a pessoa entra com Google. Se o e-mail dela não estiver em nenhum escritório, aparece "Criar escritório". Quem cria vira **administrador**.
-- **Convidar**: aba Equipe → **Convidar pessoa** → e-mail Google da pessoa. O site gera a mensagem pronta para mandar. A pessoa entra com esse e-mail e já cai no mesmo escritório, vendo os mesmos processos, agenda e chat, em qualquer aparelho.
-- Só administradores convidam, removem ou tornam alguém administrador. Quem criou o escritório não pode ser removido.
-- Ao entrar num aparelho que tinha dados do **modo local**, aparece a opção **Enviar para o escritório**.
-- Não é mais preciso listar e-mails no `config.js` nem nas regras: o acesso é controlado pela lista de membros de cada escritório.
+- **Login:** Google e e-mail/senha, com confirmação de e-mail obrigatória.
+- **Política de senha:** obrigatória, mínimo de 8 caracteres e pelo menos um número. O app também exige letras e números.
+- **Proteção contra enumeração de e-mails:** ativada. A tela de login nunca diz se um e-mail existe.
+- **Limite de tentativas:** o Firebase bloqueia do lado do servidor (`auth/too-many-requests`). O app também bloqueia no aparelho após 5 erros: 30 s, dobrando até 15 min.
+- **Banco:** Cloud Firestore em `southamerica-east1` (São Paulo). Backups programados **desativados** (ver Riscos).
+- **Domínio autorizado:** `murilodannis123-lang.github.io`.
 
-## O que tem
+## Como funciona o acesso
 
-- **Login Google**, só para e-mails liberados (trava no banco, não só na tela).
-- **Prazos** (tela inicial): carimbo D-X por urgência, filtros Vencidos / Hoje / 1–3 dias / 4–7 / +7 / sem prazo / cumpridos, ordenação mais → menos urgente, busca, filtro por responsável e área, "só os meus".
-- **Novo caso**: judicial (número CNJ com máscara, **conferência do dígito verificador** e tribunal preenchido sozinho) ou administrativo (NB/protocolo INSS/CRPS), partes, quem representamos, o que aconteceu, prazo, **responsável da equipe** e lembrete automático na agenda X dias úteis antes.
-- **Calculadora de prazo**: a partir da intimação, em dias úteis ou corridos, pulando fins de semana, feriados nacionais (inclui Carnaval, Sexta-feira Santa, Corpus Christi, 20/11 e 08/12) e, opcional, o recesso de 20/12 a 20/01. **Feriados municipais/estaduais e suspensões do tribunal não entram — sempre conferir.**
-- **Caso aberto**: andamentos (linha do tempo), marcar cumprido / reabrir, trocar responsável, agendar, **Documentos** (anexar PDFs) e **Resumo** gerado por IA a partir dos PDFs.
-- **Agenda**: calendário mensal com compromissos e prazos fatais; tocando no dia aparece a programação embaixo; compromisso **vira "Finalizado" sozinho** quando passa do horário de fim (ou do início, se não tiver fim); responsável e processo vinculado.
-- **Sininho**: prazos urgentes seus, casos atribuídos a você, compromissos marcados no seu nome e menções/mensagens diretas no chat.
-- **Equipe**: cada pessoa com cor; tocando no nome mostra **tudo ligado a ela** (casos, prazos, próximos e finalizados).
-- **Chat**: canal do escritório com `@nome` e conversas diretas.
-- Extras: painel "Hoje" e "Carga da equipe", tema escuro, exportar agenda/prazos para Google Agenda (`.ics`), backup JSON, importação JSON, funciona offline e sincroniza quando a internet volta.
+1. A pessoa cria a conta (Google ou e-mail/senha). Com e-mail/senha, precisa confirmar o e-mail antes de entrar.
+2. Sem convite, aparece **Criar escritório**. Quem cria vira dono e administrador.
+3. Administradores convidam pelo e-mail na aba **Equipe**. O convidado entra com esse e-mail e já cai no escritório.
+4. Os dados ficam em `escritorios/{id}/{equipe|casos|agenda|mensagens}`. Ninguém fora da lista `membros` lê nada (regras em `firestore.rules`).
+5. Na primeira entrada após uma mudança dos termos (`TERMOS_V` em `app/app.js`), cada pessoa vê o aviso de novidades e precisa aceitar a nova versão.
 
-## Colocando no ar (≈ 20 min)
+### Regras de segurança (resumo)
 
-### 1. Firebase
+| Coleção | Ler | Criar ou editar | Apagar |
+|---|---|---|---|
+| `escritorios/{id}` | membros | admin (o dono não pode ser removido); um membro comum só pode remover a si mesmo | ninguém |
+| `…/equipe` | membros | admin, ou a própria pessoa no próprio perfil (sem trocar o e-mail) | admin ou a própria pessoa |
+| `…/casos`, `…/agenda` | membros | membros (com limites de tamanho) | membros |
+| `…/mensagens` | membros | só em nome próprio (`autorEmail` = e-mail do login), até 4.000 caracteres; sem edição | autor ou admin |
+| `convites/{email}` | só o dono do e-mail | admin do escritório de destino | o próprio ou o admin |
+| qualquer outro caminho | negado | negado | negado |
 
-1. Acesse <https://console.firebase.google.com> com a conta Google do escritório → **Adicionar projeto** (pode desativar o Analytics).
-2. Na página do projeto, clique no ícone **Web `</>`** → dê um nome → **Registrar app**. Copie o objeto `firebaseConfig` que aparecer.
-3. **Authentication → Começar → Método de login → Google → Ativar** → Salvar.
-4. **Firestore Database → Criar banco de dados** → modo **produção** → região `southamerica-east1 (São Paulo)`.
-5. Na aba **Regras** do Firestore, apague o que tiver, cole o conteúdo de `firestore.rules`, **troque `seu-email@gmail.com` pelos e-mails da equipe** e clique em **Publicar**.
+Para publicar as regras: Firebase Console → Firestore Database → Regras → colar `firestore.rules` → Publicar.
 
-### 2. config.js
+## Privacidade (resumo técnico)
 
-Abra `config.js` e:
+- Coletamos nome, e-mail, forma de login e aceite dos termos. A foto do perfil Google não é guardada.
+- Nenhum cookie de publicidade nem ferramenta de análise. O aviso separa o armazenamento **essencial** (sessão, cópia offline, documentos, escolha do aviso, contador de tentativas) das **preferências** (tema, notificações já vistas), que só são gravadas com permissão.
+- **Minha conta e privacidade:** baixar meus dados (JSON), corrigir nome, criar ou trocar senha, sair apagando os dados do aparelho, excluir a conta (o dono do escritório não pode se excluir por aqui).
+- Documentos anexados ficam só no IndexedDB do aparelho de quem anexou.
+- O resumo por IA só funciona com uma chave de API da Anthropic cadastrada pelo usuário; o texto vai do navegador direto para a Anthropic.
 
-- troque `firebase: null,` pelo objeto copiado no passo 1.2 (é só tirar as `//` do bloco de exemplo e colar os valores);
-- preencha `allowedEmails` com **a mesma lista** das regras.
+## Riscos e pendências antes do lançamento público
 
-> A `apiKey` do Firebase não é segredo — ela fica pública em qualquer site que usa Firebase. Quem protege os dados são as **regras do Firestore**.
+1. **Hospedagem.** As regras do GitHub Pages dizem que ele não pode ser usado para rodar negócio on-line nem SaaS comercial, e que não deve ser usado para transações sensíveis como envio de senhas. Antes de vender a Pauta, migrar o site para outra hospedagem (por exemplo, Firebase Hosting no mesmo projeto) e usar um domínio próprio.
+2. **Dados do responsável:** preencher os campos [PREENCHER] (nome ou razão social, CPF/CNPJ, endereço, encarregado, e-mail de privacidade, prazos de guarda, foro, preços).
+3. **Termos de processamento de dados do Google/Firebase:** revisar e aceitar no console (Configurações do projeto → Privacidade dos dados).
+4. **Backups:** o Firestore está sem backups programados. Avaliar a ativação, que exige o plano pago por uso.
+5. **Dono do projeto:** o projeto do Firebase está numa conta pessoal. Avaliar incluir outra conta como proprietária, para não perder o acesso.
+6. **Dados sensíveis e sigilo:** processos podem ter dados de saúde. Os Termos deixam claro que o escritório é o controlador. Vale um contrato de operador (DPA) com os escritórios clientes antes de cobrar.
+7. **Documentos só no aparelho:** para compartilhar PDFs com a equipe, é preciso o Firebase Storage (plano pago por uso) e novas regras.
 
-### 3. GitHub Pages
+## Rotina de publicações (importação)
 
-1. Crie um repositório no GitHub (ex.: `pauta`).
-2. **Add file → Upload files** → arraste todos os arquivos desta pasta → Commit.
-3. **Settings → Pages → Build and deployment → Deploy from a branch → `main` / `(root)`** → Save.
-4. Em ~1 min o site estará em `https://SEU-USUARIO.github.io/pauta/`.
-
-### 4. Liberar o domínio no login
-
-Firebase → **Authentication → Configurações → Domínios autorizados → Adicionar domínio** → `SEU-USUARIO.github.io`.
-
-Pronto: entre com Google. O primeiro acesso de cada pessoa a adiciona automaticamente na **Equipe** (dá para editar nome, cargo e cor).
-
-### Para adicionar alguém depois
-
-1. Coloque o e-mail em `firestore.rules` (publicar) e em `config.js` (commit).
-2. A pessoa entra com Google e já aparece na Equipe.
-
-## Cuidados (LGPD e sigilo)
-
-- No plano grátis do GitHub o repositório é **público**: o **código** fica visível, mas **nenhum dado de cliente** vai para o GitHub — tudo fica no Firestore, fechado pelas regras.
-- Use a lista de e-mails nas regras; nunca deixe `allow read, write: if true`.
-- Prefira uma conta Google do escritório como dona do projeto Firebase.
-- Os prazos calculados são **estimativa**: a conferência no sistema do tribunal continua obrigatória.
-
-## Próximas etapas (já esquematizadas no código)
-
-### Casos adicionados automaticamente (IA)
-- Já existe a função `window.Pauta.importarCasos([...])` e a tela **Conta → Importar casos (JSON)**. Formato em `exemplo-importacao.json`.
-- `"origem": "ia"` faz o caso entrar com selo **"revisar"** e aviso na tela de prazos até alguém clicar em **Conferido**.
-- `responsavel` aceita e-mail ou nome de quem está na Equipe.
-- Caminho natural: uma função na nuvem (Firebase Cloud Functions) que recebe o texto da intimação/PDF, chama a IA e grava na coleção `casos` com `origem: "ia"`.
-
-### Documentos e resumo (já funcionando)
-- Cada caso tem a aba **Documentos**: arraste ou escolha PDFs, imagens ou .txt. Os arquivos ficam no **IndexedDB deste navegador** (não vão para o GitHub nem para o backup JSON).
-- A aba **Resumo** lê os PDFs (texto extraído no próprio navegador com pdf.js) e manda para a **API do Claude**, que devolve o resumo com as páginas citadas. O resumo fica salvo no caso com o selo "gerado por IA · conferir".
-- Precisa de uma chave da API: menu da conta → **Configurar IA**. A chave fica só naquele navegador. Cada resumo é cobrado na conta da API.
-- PDFs escaneados (só imagem) vão direto como arquivo, até 100 páginas / 20 MB por documento.
-- Processos muito longos: acima de ~500 mil caracteres, o início e o fim dos autos são lidos e o meio é pulado (o resumo avisa).
-
-### Receber PDF de outra aba (para o Claude pegar o processo no tribunal)
-A Pauta aceita arquivos enviados por `postMessage` de páginas `*.jus.br` (outras origens: `origensAnexo` no `config.js`). Na aba do tribunal, já logado:
-
-```js
-const buf = await fetch(URL_DO_PDF, { credentials: 'include' }).then(r => r.arrayBuffer());
-const w = window.open('https://murilodannis123-lang.github.io/pauta-coradelli/', 'pauta');
-await new Promise(ok => addEventListener('message', function h(e) { if (e.data?.tipo === 'pauta-pronta') { removeEventListener('message', h); ok(); } }));
-const resp = new Promise(ok => addEventListener('message', e => e.data?.tipo === 'pauta-anexado' && ok(e.data)));
-w.postMessage({ tipo: 'pauta-anexar', processo: 'NÚMERO CNJ', nome: 'autos.pdf', arquivo: buf }, 'https://murilodannis123-lang.github.io');
-await resp; // { ok: true, casoId, docId } ou { ok: false, erro }
-```
-
-Na própria página da Pauta também existem `Pauta.anexarArquivo(numero, blob, nome)`, `Pauta.gerarResumo(numero)` e `Pauta.salvarResumo(numero, texto)`.
-
-## Estrutura do banco (Firestore)
-
-```
-equipe/{id}     nome, cargo, email, cor, foto
-casos/{id}      tipo, numero, autor, reu, representa, area, orgao, tipoPrazo, prazo (AAAA-MM-DD),
-                responsavelId, status (aberto|cumprido), andamentos[], resumo, pdf,
-                origem (manual|importado|ia), revisado, criadoPor, criadoEm,
-                documentos[] {id, nome, tipo, tamanho, paginas, criadoEm, por}  (arquivo no IndexedDB do aparelho)
-agenda/{id}     titulo, tipo, data, inicio, fim, responsavelId, casoId, descricao, concluido, criadoPor
-mensagens/{id}  canal (geral | dm:idA:idB), autorId, autorNome, texto, criadoEm
-```
+Casos podem entrar em lote pelo menu da conta → **Importar casos (JSON)** (formato em `exemplo-importacao.json`) ou por `window.Pauta.importarCasos([...])`. Com `"origem": "ia"`, o caso entra marcado como **revisar**.

@@ -3,21 +3,147 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Pauta Coradelli</title>
-  <meta name="description" content="Prazos, agenda, equipe e chat do escritório.">
+  <title>Pauta</title>
+  <meta name="description" content="Pauta: prazos processuais, agenda, equipe e conversa do escritório de advocacia num lugar só.">
+  <meta name="robots" content="noindex">
   <meta name="theme-color" content="#131C31">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232347B0'/%3E%3Ctext x='32' y='46' font-family='Georgia,serif' font-size='42' font-weight='700' fill='white' text-anchor='middle'%3E%C2%A7%3C/text%3E%3C/svg%3E">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Spectral:wght@500;600&display=swap">
-  <link rel="stylesheet" href="styles.css">
+  <script>
+    /* Quem já usa o sistema neste aparelho (ou chegou por um link antigo com #prazos, #calendario…) vai direto para o app. ?site mostra esta página. */
+    (function () {
+      try {
+        var t = localStorage.getItem('pauta-tema'); if (t) document.documentElement.setAttribute('data-theme', JSON.parse(t));
+        if (/[?&]site\b/.test(location.search)) return;
+        var h = location.hash.slice(1);
+        var usou = Object.keys(localStorage).some(function (k) { return /^pauta-(vistos-|chat-|local-v1|tentativas|ia)/.test(k); });
+        if (/^(prazos|calendario|equipe|chat)$/.test(h) || usou) return location.replace('app/' + location.hash);
+        /* sessão de login guardada pelo Firebase neste aparelho */
+        if (indexedDB.databases) indexedDB.databases().then(function (l) { if (l.some(function (d) { return d.name === 'firebaseLocalStorageDb'; })) location.replace('app/'); }).catch(function () {});
+      } catch (e) { /* sem acesso ao armazenamento: mostra a página */ }
+    })();
+  </script>
+  <link rel="stylesheet" href="assets/fonts/fonts.css">
+  <link rel="stylesheet" href="assets/site.css">
 </head>
 <body>
-  <div id="app"></div>
-  <div id="modal-root"></div>
-  <div id="toasts" aria-live="polite"></div>
-  <input type="file" id="backup-file" accept=".json,application/json" hidden>
-  <script src="config.js"></script>
-  <script type="module" src="app.js"></script>
+  <a class="pular" href="#conteudo">Pular para o conteúdo</a>
+
+  <header class="topo">
+    <div class="wrap">
+      <a class="marca" href="./?site"><span class="marca-sinal" aria-hidden="true">§</span>Pauta</a>
+      <nav aria-label="Principal">
+        <a class="ocultar-celular" href="#recursos">Recursos</a>
+        <a class="ocultar-celular" href="#seus-dados">Seus dados</a>
+        <a href="app/">Entrar</a>
+        <a class="btn primario" href="app/#criar">Criar conta</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="conteudo">
+    <section class="hero" aria-labelledby="titulo">
+      <div class="wrap">
+        <div>
+          <span class="selo">Em fase de testes</span>
+          <h1 id="titulo">Os prazos do escritório, <em>à vista de toda a equipe.</em></h1>
+          <p class="lede">A Pauta reúne os prazos dos processos, a agenda, a equipe e a conversa do escritório num só lugar. Cada prazo mostra quantos dias faltam e quem cuida dele.</p>
+          <div class="acoes">
+            <a class="btn primario" href="app/#criar">Criar conta</a>
+            <a class="btn" href="app/">Já tenho conta</a>
+          </div>
+        </div>
+
+        <figure class="amostra" aria-label="Exemplo da lista de prazos, com dados fictícios" style="margin:0">
+          <div class="amostra-topo">Prazos <span>exemplo</span></div>
+          <div class="linha">
+            <span class="carimbo atraso"><span><i>atraso</i><b>1</b><i>dia</i></span></span>
+            <span><b>Manifestação · Maria S. × INSS</b><small>Previdenciário · resp. Ana</small></span>
+          </div>
+          <div class="linha">
+            <span class="carimbo hoje"><span><i>vence</i><b>HOJE</b></span></span>
+            <span><b>Réplica · João A. × Banco Exemplo</b><small>Consumidor · resp. Carlos</small></span>
+          </div>
+          <div class="linha">
+            <span class="carimbo urgente"><span><i>faltam</i><b>3</b><i>dias</i></span></span>
+            <span><b>Recurso · Rosana F. × Metalúrgica Exemplo</b><small>Trabalhista · resp. Beatriz</small></span>
+          </div>
+          <div class="linha">
+            <span class="carimbo ok"><span><i>faltam</i><b>26</b><i>dias</i></span></span>
+            <span><b>Contestação · Ricardo C. × Fernanda C.</b><small>Família · resp. Ana</small></span>
+          </div>
+          <figcaption class="amostra-nota">Nomes e processos fictícios, só para mostrar a tela.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="bloco" id="recursos" aria-labelledby="t-recursos">
+      <div class="wrap">
+        <h2 id="t-recursos">O que a Pauta faz hoje</h2>
+        <p class="intro">Só o que já está funcionando. A Pauta é uma ferramenta de apoio: a conferência dos prazos nos sistemas dos tribunais continua sendo do escritório.</p>
+        <ul class="recursos">
+          <li><h3>Prazos por urgência</h3><p>Filtros por atraso, hoje, próximos dias e cumpridos. Cada caso mostra o tipo de prazo, a data e o responsável.</p></li>
+          <li><h3>Cálculo de prazo</h3><p>Conta dias úteis ou corridos a partir da intimação, pulando fins de semana, feriados nacionais e, se você quiser, o recesso de fim de ano. Feriados locais e suspensões do tribunal não entram.</p></li>
+          <li><h3>Agenda da equipe</h3><p>Audiências, perícias e reuniões com responsável. Os prazos dos casos aparecem no calendário, e o compromisso passa a finalizado quando o horário termina.</p></li>
+          <li><h3>Equipe e convites</h3><p>Quem cria o escritório convida as pessoas pelo e-mail. Cada um vê os casos e compromissos que estão no seu nome.</p></li>
+          <li><h3>Conversa do escritório</h3><p>Canal da equipe com menções e conversas diretas, ligado às marcações do sininho.</p></li>
+          <li><h3>Documentos e resumo</h3><p>Anexe o PDF do processo ao caso. Com uma chave de API própria, gere um resumo por IA que indica as páginas, para conferência humana.</p></li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="bloco" aria-labelledby="t-comecar">
+      <div class="wrap">
+        <h2 id="t-comecar">Como começar</h2>
+        <ol class="passos">
+          <li><h3>Crie sua conta</h3><p>Com o Google ou com e-mail e senha. Pedimos para confirmar o e-mail antes do primeiro acesso.</p></li>
+          <li><h3>Crie o escritório</h3><p>Quem cria vira administrador e define o nome do escritório.</p></li>
+          <li><h3>Convide a equipe</h3><p>Informe o e-mail de cada pessoa. Ela entra com esse e-mail e já cai no escritório.</p></li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="bloco" id="seus-dados" aria-labelledby="t-dados">
+      <div class="wrap">
+        <h2 id="t-dados">Seus dados</h2>
+        <ul class="dados">
+          <li><span>Só membros do escritório leem os dados dele. Isso é aplicado pelas regras do banco de dados, não apenas pela tela.</span></li>
+          <li><span>O banco de dados fica no Google Cloud (Firebase), na região de São Paulo. As senhas são guardadas pelo Firebase Authentication apenas na forma de hash.</span></li>
+          <li><span>Não usamos cookies de publicidade nem ferramentas de análise. As fontes e as bibliotecas do site são servidas daqui mesmo.</span></li>
+          <li><span>Você pode baixar seus dados ou excluir sua conta em "Minha conta e privacidade".</span></li>
+        </ul>
+        <p class="intro">Detalhes na <a href="privacidade.html">Política de Privacidade</a> e nos <a href="termos.html">Termos de Uso</a>.</p>
+      </div>
+    </section>
+
+    <section class="bloco" aria-labelledby="t-teste">
+      <div class="wrap">
+        <div class="aviso-teste">
+          <div>
+            <h2 id="t-teste" style="font-size:28px">A Pauta está em fase de testes</h2>
+            <p>Os recursos ainda podem mudar. Durante os testes, use também os sistemas oficiais para acompanhar os prazos.</p>
+          </div>
+          <a class="btn primario" href="app/#criar">Criar conta</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <span>© <span id="ano">2026</span> Pauta</span>
+      <nav aria-label="Rodapé">
+        <a href="termos.html">Termos de Uso</a>
+        <a href="privacidade.html">Política de Privacidade</a>
+        <button type="button" class="link" id="prefs">Preferências de armazenamento</button>
+      </nav>
+    </div>
+  </footer>
+
+  <script src="assets/consent.js"></script>
+  <script>
+    document.getElementById('ano').textContent = new Date().getFullYear();
+    PautaConsent.banner({ privacidadeUrl: 'privacidade.html' });
+    document.getElementById('prefs').addEventListener('click', function () { PautaConsent.banner({ forcar: true, privacidadeUrl: 'privacidade.html' }); });
+  </script>
 </body>
 </html>

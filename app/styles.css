@@ -251,7 +251,7 @@ p { margin: 0; }
 .today-panel { display: flex; flex-direction: column; gap: 12px; position: sticky; top: calc(env(safe-area-inset-top, 0px) + 88px); }
 .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; display: flex; flex-direction: column; gap: 12px; }
 .panel-h { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.panel-h h3 { font-family: var(--font-display); font-size: 18px; font-weight: 600; }
+.panel-h h2, .panel-h h3 { font-family: var(--font-display); font-size: 18px; font-weight: 600; }
 .panel-h small { color: var(--muted); font-size: 12.5px; }
 .mini-ev { display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 10px; align-items: start; padding: 0; border: 0; background: none; text-align: left; width: 100%; }
 .mini-ev .t { font-family: var(--font-mono); font-size: 13px; color: var(--muted); padding-top: 1px; }
@@ -468,3 +468,26 @@ pre.code { margin: 0; padding: 12px; border-radius: var(--r-sm); background: var
 .resumo-md p { overflow-wrap: anywhere; }
 .resumo-md .pg { display: inline-block; padding: 0 5px; border-radius: 4px; background: var(--surface-2); border: 1px solid var(--line); font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); white-space: nowrap; }
 .resumo-meta { display: flex; gap: 6px 12px; flex-wrap: wrap; align-items: center; font-size: 12.5px; color: var(--muted); }
+
+.pill.prazo-pill { background: var(--surface); color: var(--danger); }
+.ev .t small { white-space: nowrap; }
+
+/* acessibilidade e telas de conta */
+.pular { position: absolute; left: 12px; top: -60px; z-index: 100; padding: 10px 14px; border-radius: 8px; background: var(--ink); color: var(--paper); font-weight: 600; text-decoration: none; }
+.pular:focus { top: calc(12px + env(safe-area-inset-top, 0px)); }
+.content:focus { outline: none; }
+.field > label { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.login-title { font-family: var(--font-display); font-size: 30px; font-weight: 600; line-height: 1.05; }
+.login-ok { padding: 10px 12px; border-radius: var(--r-sm); background: var(--ok-soft); color: var(--ok); font-size: 14px; }
+.login-tabs { align-self: stretch; display: grid; grid-template-columns: 1fr 1fr; }
+.login-tabs button { justify-content: center; }
+.login-panel, .login-form { display: flex; flex-direction: column; gap: 12px; }
+.login-ou { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12.5px; }
+.login-ou::before, .login-ou::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.check.aceite { align-items: flex-start; line-height: 1.45; }
+.check.aceite input { margin-top: 2px; flex: none; }
+.login-foot a, .modal a, .hint a { color: var(--accent); }
+.novidades { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 10px; }
+.acoes-conta { display: flex; flex-wrap: wrap; gap: 8px; }
+.calc.perigo summary { color: var(--danger); }
+.modal:focus { outline: none; }

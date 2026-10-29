@@ -1,9 +1,14 @@
 rules_version = '2';
 
-// Regras do Firestore da Pauta — modelo "escritório + convites".
-// Quem cria o escritório vira administrador. Administradores convidam pelo e-mail Google.
-// Só quem está na lista "membros" do escritório lê ou grava os dados dele.
-// Cole em: Firebase Console → Firestore Database → Regras → Publicar.
+// Regras de segurança do Firestore da Pauta (equivalente às políticas RLS de um banco SQL).
+// Princípios:
+//  - Nada é lido ou gravado sem login com e-mail verificado.
+//  - Cada escritório só é acessado por quem está na lista "membros" dele.
+//  - Só administradores convidam, removem pessoas ou mudam dados do escritório.
+//  - Cada pessoa só edita o próprio perfil (administradores podem editar todos).
+//  - Mensagens só podem ser enviadas em nome próprio e não podem ser editadas.
+//  - Qualquer caminho não listado aqui é negado.
+// Publicar em: Firebase Console → Firestore Database → Regras → Publicar.
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -14,40 +19,98 @@ service cloud.firestore {
     function meuEmail() {
       return request.auth.token.email.lower();
     }
-    function esc(eid) {
-      return get(/databases/$(database)/documents/escritorios/$(eid)).data;
+    function escPath(eid) {
+      return /databases/$(database)/documents/escritorios/$(eid);
     }
     function membro(eid) {
-      return logado() && exists(/databases/$(database)/documents/escritorios/$(eid)) && meuEmail() in esc(eid).membros;
+      return logado() && exists(escPath(eid)) && meuEmail() in get(escPath(eid)).data.membros;
     }
     function admin(eid) {
-      return logado() && exists(/databases/$(database)/documents/escritorios/$(eid)) && meuEmail() in esc(eid).admins;
+      return logado() && exists(escPath(eid)) && meuEmail() in get(escPath(eid)).data.admins;
+    }
+    function textoAte(v, max) {
+      return v is string && v.size() <= max;
     }
 
     match /escritorios/{eid} {
       allow get: if logado() && meuEmail() in resource.data.membros;
+      allow list: if false;
+
       allow create: if logado()
+        && request.resource.data.keys().hasOnly(['nome', 'donoUid', 'donoEmail', 'membros', 'admins', 'criadoEm'])
+        && textoAte(request.resource.data.nome, 120)
         && request.resource.data.donoUid == request.auth.uid
         && request.resource.data.donoEmail == meuEmail()
         && request.resource.data.membros == [meuEmail()]
         && request.resource.data.admins == [meuEmail()];
-      // Só administradores alteram; o dono nunca sai da lista nem perde o admin.
-      allow update: if logado() && meuEmail() in resource.data.admins
-        && request.resource.data.donoUid == resource.data.donoUid
-        && request.resource.data.donoEmail == resource.data.donoEmail
-        && resource.data.donoEmail in request.resource.data.membros
-        && resource.data.donoEmail in request.resource.data.admins;
+
+      // Administrador: altera nome, configurações e listas; o dono nunca perde acesso nem admin.
+      // Membro comum: só pode remover a si mesmo (excluir a própria conta).
+      allow update: if logado() && (
+        (
+          meuEmail() in resource.data.admins
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['nome', 'advogadosResumo', 'membros', 'admins'])
+          && textoAte(request.resource.data.nome, 120)
+          && (!('advogadosResumo' in request.resource.data) || textoAte(request.resource.data.advogadosResumo, 300))
+          && request.resource.data.membros.size() <= 200
+          && resource.data.donoEmail in request.resource.data.membros
+          && resource.data.donoEmail in request.resource.data.admins
+        ) || (
+          meuEmail() in resource.data.membros
+          && meuEmail() != resource.data.donoEmail
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['membros', 'admins'])
+          && request.resource.data.membros.toSet() == resource.data.membros.toSet().difference([meuEmail()].toSet())
+          && request.resource.data.admins.toSet() == resource.data.admins.toSet().difference([meuEmail()].toSet())
+        )
+      );
       allow delete: if false;
 
-      match /{colecao}/{id} {
-        allow read, write: if colecao in ['equipe', 'casos', 'agenda', 'mensagens'] && membro(eid);
+      match /equipe/{id} {
+        allow read: if membro(eid);
+        allow create: if membro(eid)
+          && textoAte(request.resource.data.nome, 80)
+          && textoAte(request.resource.data.email, 120)
+          && (admin(eid) || request.resource.data.email == meuEmail());
+        allow update: if membro(eid)
+          && textoAte(request.resource.data.nome, 80)
+          && request.resource.data.email == resource.data.email
+          && (admin(eid) || resource.data.email == meuEmail());
+        allow delete: if membro(eid) && (admin(eid) || resource.data.email == meuEmail());
+      }
+
+      match /casos/{id} {
+        allow read: if membro(eid);
+        allow create, update: if membro(eid)
+          && textoAte(request.resource.data.autor, 300)
+          && textoAte(request.resource.data.reu, 300);
+        allow delete: if membro(eid);
+      }
+
+      match /agenda/{id} {
+        allow read: if membro(eid);
+        allow create, update: if membro(eid) && textoAte(request.resource.data.titulo, 300);
+        allow delete: if membro(eid);
+      }
+
+      match /mensagens/{id} {
+        allow read: if membro(eid);
+        allow create: if membro(eid)
+          && request.resource.data.autorEmail == meuEmail()
+          && request.resource.data.texto is string
+          && request.resource.data.texto.size() > 0
+          && request.resource.data.texto.size() <= 4000;
+        allow update: if false;
+        allow delete: if membro(eid) && (resource.data.get('autorEmail', '') == meuEmail() || admin(eid));
       }
     }
 
     // convites/{email} → { eid }: diz a cada pessoa em qual escritório ela entra.
     match /convites/{email} {
       allow get: if logado() && email == meuEmail();
-      allow create: if logado() && admin(request.resource.data.eid);
+      allow list: if false;
+      allow create: if logado()
+        && request.resource.data.keys().hasOnly(['eid', 'por', 'criadoEm'])
+        && admin(request.resource.data.eid);
       allow update: if logado() && admin(resource.data.eid) && admin(request.resource.data.eid);
       allow delete: if logado() && (email == meuEmail() || admin(resource.data.eid));
     }
