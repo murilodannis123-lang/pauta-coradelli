@@ -163,6 +163,8 @@ const ICON = {
   left: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>',
   right: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>',
   file: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 13h6M9 17h6"/></svg>',
+  expand: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/></svg>',
+  shrink: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 10h-6V4M4 14h6v6M14 10l7-7M10 14l-7 7"/></svg>',
   clip: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5l-8 8a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7L9.7 17.2a1.7 1.7 0 0 1-2.4-2.4L15 7.1"/></svg>',
   key: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3M15 8l2 2"/></svg>',
   spark: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 16l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z"/></svg>',
@@ -377,7 +379,7 @@ let fb = null;     // módulos do Firebase
 const ui = {
   view: 'prazos', filtro: 'ativos', ordem: 'urgentes', busca: '', area: '', resp: '', soMeus: false,
   calY: new Date().getFullYear(), calM: new Date().getMonth(), calDia: todayISO(),
-  membroId: null, canal: 'geral', caso: null, casoAba: 'andamentos', bell: false, menu: false, resumoJob: null,
+  membroId: null, canal: 'geral', caso: null, casoAba: 'andamentos', bell: false, menu: false, resumoJob: null, casoCheio: (() => { try { return !!localStorage.getItem('pauta-caso-cheio'); } catch { return false; } })(),
 };
 const member = id => Store.data.equipe.find(m => m.id === id);
 const meMember = () => me && (me.localId ? member(me.localId) : null) || me && !me.localId && Store.data.equipe.find(m => (m.email || '').toLowerCase() === (me.email || '').toLowerCase());
@@ -921,9 +923,9 @@ function drawerHTML() {
     <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn small" data-act="edit-case" data-id="${esc(c.id)}">${ICON.edit}Editar</button><button class="btn small danger" data-act="del-case" data-id="${esc(c.id)}">${ICON.trash}Excluir caso</button></div>`;
   }
   return `<div class="scrim" data-act="close-drawer"></div>
-  <div class="drawer" role="dialog" aria-modal="true" aria-label="Detalhes do caso">
+  <div class="drawer ${ui.casoCheio ? 'cheio' : ''}" role="dialog" aria-modal="true" aria-label="Detalhes do caso" data-scroll="drawer">
     <div class="drawer-head">
-      <div class="drawer-top"><span class="eyebrow">${c.tipo === 'administrativo' ? 'Processo administrativo' : 'Processo judicial'}${c.area ? ' · ' + esc(c.area) : ''}</span><button class="icon-btn" data-act="close-drawer" aria-label="Fechar">${ICON.x}</button></div>
+      <div class="drawer-top"><span class="eyebrow">${c.tipo === 'administrativo' ? 'Processo administrativo' : 'Processo judicial'}${c.area ? ' · ' + esc(c.area) : ''}</span><span class="drawer-top-acoes"><button class="icon-btn" data-act="expandir-caso" aria-label="${ui.casoCheio ? 'Reduzir' : 'Abrir em tela cheia'}" title="${ui.casoCheio ? 'Reduzir' : 'Tela cheia'}">${ui.casoCheio ? ICON.shrink : ICON.expand}</button><button class="icon-btn" data-act="close-drawer" aria-label="Fechar">${ICON.x}</button></span></div>
       <div class="proc-num"><span class="mono">${esc(c.numero || 'Sem número')}</span>${c.numero ? `<button class="mini-btn" data-act="copy" data-text="${esc(c.numero)}">${ICON.copy}Copiar</button>` : ''}</div>
       <h2 class="drawer-title">${esc(c.autor)} <span class="vs">×</span> ${esc(c.reu)}</h2>
       <div class="meta-row">${stamp(u, true)}<span><b style="color:var(--ink)">${esc(c.tipoPrazo || 'Prazo')}</b> · ${c.prazo ? fmtDate(c.prazo) : 'sem data'}</span><span>${esc(u.label)}${du !== null && du > 0 ? ` · ${du} ${du === 1 ? 'dia útil' : 'dias úteis'}` : ''}</span>${c.orgao ? `<span>${esc(c.orgao)}</span>` : ''}</div>
@@ -934,10 +936,13 @@ function drawerHTML() {
           : `<button class="btn small primary" data-act="toggle-cumprido" data-id="${esc(c.id)}">${ICON.check}Marcar cumprido</button>`}
         <button class="btn small" data-act="novo-evento" data-v="${esc(c.prazo || todayISO())}" data-caso="${esc(c.id)}">${ICON.calendario}Agendar</button>
       </div>
-      ${c.origem === 'ia' && !c.revisado ? `<div class="notice ia">${ICON.spark}<span>Cadastrado automaticamente. Confira número, partes e prazo no processo antes de confiar.</span><button class="btn small" data-act="revisado" data-id="${esc(c.id)}">${ICON.check}Conferido</button></div>` : ''}
+      ${c.origem === 'ia' && !c.revisado ? `<div class="notice ia compacto">${ICON.spark}<span>Cadastrado automaticamente: confira número, partes e prazo antes de confiar.</span><button class="btn small" data-act="revisado" data-id="${esc(c.id)}">${ICON.check}Conferido</button></div>` : ''}
     </div>
-    <nav class="drawer-tabs" aria-label="Seções do caso">${abas.map(([k, l, ic]) => `<button class="${ui.casoAba === k ? 'on' : ''}" data-act="case-tab" data-v="${k}">${ic}${l}</button>`).join('')}</nav>
-    <div class="drawer-body" data-scroll="drawer">${body}</div>
+    <div class="drawer-tabbar">
+      <nav class="drawer-tabs" aria-label="Seções do caso">${abas.map(([k, l, ic]) => `<button class="${ui.casoAba === k ? 'on' : ''}" data-act="case-tab" data-v="${k}" ${ui.casoAba === k ? 'aria-current="true"' : ''}>${ic}${l}</button>`).join('')}</nav>
+      <button class="icon-btn fechar-mini" data-act="close-drawer" aria-label="Fechar o caso" title="Fechar">${ICON.x}</button>
+    </div>
+    <div class="drawer-body">${body}</div>
   </div>`;
 }
 
@@ -1421,7 +1426,13 @@ document.addEventListener('click', async ev => {
     case 'novo-caso': return caseModal();
     case 'open-case': ui.caso = id; ui.casoAba = 'andamentos'; return refresh();
     case 'close-drawer': ui.caso = null; return refresh();
-    case 'case-tab': ui.casoAba = v; return refresh();
+    case 'case-tab': {
+      ui.casoAba = v; refresh();
+      const d = $('.drawer'), bar = $('.drawer-tabbar');
+      if (d && bar && d.scrollTop > bar.offsetTop) d.scrollTop = bar.offsetTop; // mostra o começo da aba escolhida
+      return;
+    }
+    case 'expandir-caso': ui.casoCheio = !ui.casoCheio; try { localStorage.setItem('pauta-caso-cheio', ui.casoCheio ? '1' : ''); } catch { /* ok */ } return refresh();
     case 'edit-case': return caseModal(Store.get('casos', id));
     case 'del-case': return confirmModal('Excluir este caso e todo o histórico de andamentos? Os compromissos da agenda continuam.', 'Excluir caso', async () => { ui.caso = null; await safe(Store.remove('casos', id), 'Caso excluído'); refresh(); });
     case 'toggle-cumprido': {
