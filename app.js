@@ -117,14 +117,15 @@ function businessDaysUntil(iso) { const t = todayISO(); if (iso <= t) return 0; 
 
 /* urgência do prazo */
 function urg(c) {
-  if (c.status === 'cumprido') return { k: 'cumprido', label: 'Cumprido', top: '✓', sub: 'feito', rank: 9 };
-  if (!c.prazo) return { k: 'semprazo', label: 'Sem prazo', top: '—', sub: 'sem data', rank: 8 };
-  const d = daysBetween(todayISO(), c.prazo);
-  if (d < 0) return { k: 'vencido', label: d === -1 ? 'Venceu ontem' : `Venceu há ${-d} dias`, top: `D+${-d}`, sub: 'vencido', rank: 0, d };
-  if (d === 0) return { k: 'hoje', label: 'Vence hoje', top: 'HOJE', sub: 'fatal', rank: 1, d };
-  if (d <= 3) return { k: 'urgente', label: d === 1 ? 'Vence amanhã' : `Vence em ${d} dias`, top: `D-${d}`, sub: 'urgente', rank: 2, d };
-  if (d <= 7) return { k: 'proximo', label: `Vence em ${d} dias`, top: `D-${d}`, sub: 'semana', rank: 3, d };
-  return { k: 'tranquilo', label: `Vence em ${d} dias`, top: `D-${d}`, sub: 'no prazo', rank: 4, d };
+  if (c.status === 'cumprido') return { k: 'cumprido', label: 'Cumprido', pre: 'prazo', top: '✓', sub: 'cumprido', rank: 9 };
+  if (!c.prazo) return { k: 'semprazo', label: 'Sem prazo', pre: '', top: '—', sub: 'sem prazo', rank: 8 };
+  const d = daysBetween(todayISO(), c.prazo), n = Math.abs(d), dias = n === 1 ? 'dia' : 'dias';
+  if (d < 0) return { k: 'vencido', label: d === -1 ? 'Venceu ontem' : `Venceu há ${n} dias`, pre: 'atraso', top: String(n), sub: dias, rank: 0, d };
+  if (d === 0) return { k: 'hoje', label: 'Vence hoje', pre: 'vence', top: 'HOJE', sub: '', rank: 1, d };
+  const base = { pre: d === 1 ? 'falta' : 'faltam', top: String(d), sub: dias, d };
+  if (d <= 3) return { ...base, k: 'urgente', label: d === 1 ? 'Vence amanhã' : `Vence em ${d} dias`, rank: 2 };
+  if (d <= 7) return { ...base, k: 'proximo', label: `Vence em ${d} dias`, rank: 3 };
+  return { ...base, k: 'tranquilo', label: `Vence em ${d} dias`, rank: 4 };
 }
 const FILTROS = [['ativos', 'Ativos'], ['vencido', 'Vencidos'], ['hoje', 'Hoje'], ['urgente', '1 a 3 dias'], ['proximo', '4 a 7 dias'], ['tranquilo', 'Mais de 7'], ['semprazo', 'Sem prazo'], ['cumprido', 'Cumpridos']];
 
@@ -436,7 +437,9 @@ function avatar(m, cls = '') {
   return `<span class="av ${cls}" style="background:${esc(m.cor || CORES[0])}" title="${esc(m.nome)}">${esc(initials(m.nome))}</span>`;
 }
 const whoChip = m => m ? `<span class="who">${avatar(m, 'sm')}${esc(firstName(m.nome))}</span>` : '<span class="who">Sem responsável</span>';
-const stamp = (u, inline = false) => `<span class="stamp ${u.k}${inline ? ' inline' : ''}"><span><b>${esc(u.top)}</b>${inline ? '' : `<small>${esc(u.sub)}</small>`}</span></span>`;
+const stamp = (u, inline = false) => inline
+  ? `<span class="stamp ${u.k} inline"><span><b>${esc(u.k === 'hoje' ? 'HOJE' : u.k === 'cumprido' ? '✓ cumprido' : u.k === 'semprazo' ? 'sem prazo' : `${u.top} ${u.sub}`)}</b></span></span>`
+  : `<span class="stamp ${u.k}" title="${esc(u.label)}"><span>${u.pre ? `<small class="pre">${esc(u.pre)}</small>` : ''}<b>${esc(u.top)}</b>${u.sub ? `<small>${esc(u.sub)}</small>` : ''}</span></span>`;
 const memberOptions = (sel, none = 'Sem responsável') => `<option value="">${esc(none)}</option>` + Store.data.equipe.map(m => `<option value="${esc(m.id)}" ${m.id === sel ? 'selected' : ''}>${esc(m.nome)}</option>`).join('');
 const options = (arr, sel, none) => (none ? `<option value="">${esc(none)}</option>` : '') + arr.map(a => `<option ${a === sel ? 'selected' : ''}>${esc(a)}</option>`).join('');
 
