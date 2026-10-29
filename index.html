@@ -9,17 +9,10 @@
   <meta name="theme-color" content="#131C31">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232347B0'/%3E%3Ctext x='32' y='46' font-family='Georgia,serif' font-size='42' font-weight='700' fill='white' text-anchor='middle'%3E%C2%A7%3C/text%3E%3C/svg%3E">
   <script>
-    /* Quem já usa o sistema neste aparelho (ou chegou por um link antigo com #prazos, #calendario…) vai direto para o app. ?site mostra esta página. */
+    /* Links antigos com #prazos, #calendario, #equipe ou #chat vão direto para o sistema. */
     (function () {
-      try {
-        var t = localStorage.getItem('pauta-tema'); if (t) document.documentElement.setAttribute('data-theme', JSON.parse(t));
-        if (/[?&]site\b/.test(location.search)) return;
-        var h = location.hash.slice(1);
-        var usou = Object.keys(localStorage).some(function (k) { return /^pauta-(vistos-|chat-|local-v1|tentativas|ia)/.test(k); });
-        if (/^(prazos|calendario|equipe|chat)$/.test(h) || usou) return location.replace('app/' + location.hash);
-        /* sessão de login guardada pelo Firebase neste aparelho */
-        if (indexedDB.databases) indexedDB.databases().then(function (l) { if (l.some(function (d) { return d.name === 'firebaseLocalStorageDb'; })) location.replace('app/'); }).catch(function () {});
-      } catch (e) { /* sem acesso ao armazenamento: mostra a página */ }
+      try { var t = localStorage.getItem('pauta-tema'); if (t) document.documentElement.setAttribute('data-theme', JSON.parse(t)); } catch (e) { /* ok */ }
+      if (/^#(prazos|calendario|equipe|chat)$/.test(location.hash)) location.replace('app/' + location.hash);
     })();
   </script>
   <link rel="stylesheet" href="assets/fonts/fonts.css">
@@ -28,9 +21,10 @@
 <body>
   <a class="pular" href="#conteudo">Pular para o conteúdo</a>
 
+  <div class="ja-usa" id="ja-usa" hidden><div class="wrap"><span>Você já usa a Pauta neste aparelho.</span><a class="btn primario" href="app/">Abrir a Pauta</a></div></div>
   <header class="topo">
     <div class="wrap">
-      <a class="marca" href="./?site"><span class="marca-sinal" aria-hidden="true">§</span>Pauta</a>
+      <a class="marca" href="./"><span class="marca-sinal" aria-hidden="true">§</span>Pauta</a>
       <nav aria-label="Principal">
         <a class="ocultar-celular" href="#recursos">Recursos</a>
         <a class="ocultar-celular" href="#seus-dados">Seus dados</a>
@@ -143,6 +137,11 @@
   <script>
     document.getElementById('ano').textContent = new Date().getFullYear();
     PautaConsent.banner({ privacidadeUrl: 'privacidade.html' });
+    (function () {
+      var mostrar = function () { document.getElementById('ja-usa').hidden = false; };
+      try { if (Object.keys(localStorage).some(function (k) { return /^pauta-(vistos-|chat-|local-v1|tentativas|ia)/.test(k); })) return mostrar(); } catch (e) { /* ok */ }
+      if (window.indexedDB && indexedDB.databases) indexedDB.databases().then(function (l) { if (l.some(function (d) { return d.name === 'firebaseLocalStorageDb'; })) mostrar(); }).catch(function () {});
+    })();
     document.getElementById('prefs').addEventListener('click', function () { PautaConsent.banner({ forcar: true, privacidadeUrl: 'privacidade.html' }); });
   </script>
 </body>

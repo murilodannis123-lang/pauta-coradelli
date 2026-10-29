@@ -132,3 +132,7 @@ footer button.link { background: none; border: 0; padding: 0; font: inherit; col
 .legal .preencher { background: var(--warn-soft); color: var(--warn); padding: 0 4px; border-radius: 3px; font-weight: 600; }
 .legal .sumario { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 20px; margin-top: 24px; }
 .legal .sumario ol { margin-top: 6px; }
+
+.ja-usa { background: var(--ink); color: var(--paper); }
+.ja-usa .wrap { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-block: 10px; font-weight: 500; }
+.ja-usa .btn.primario { min-height: 38px; }
